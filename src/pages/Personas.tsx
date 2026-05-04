@@ -185,6 +185,20 @@ export default function Personas() {
                       ))}
                     </div>
                   </div>
+                  <div style={{ marginTop: 12, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <AskBot
+                      botSlug="marketing-strategist"
+                      label="Diskutera"
+                      size="small"
+                      prefill={`Hjälp mig tänka kring persona "${p.name} (${p.title})": ${p.role}. Triggers: ${p.triggers}. Invändning: ${p.objection}. Vad ska vi prioritera för denna målgrupp närmsta veckorna?`}
+                    />
+                    <AskBot
+                      botSlug="content-writer"
+                      label="Skriv för denna"
+                      size="small"
+                      prefill={`Skriv ett kort innehåll riktat till persona "${p.name}" (${p.title}). Triggers: ${p.triggers}. Roll: ${p.role}. Föreslå tre alternativ — t.ex. ett LinkedIn-inlägg, en e-postrubrik, en blogg-hook.`}
+                    />
+                  </div>
                 </>
               )}
 

@@ -173,6 +173,14 @@ export default function Competitors() {
                 {c.message}
               </div>
             </div>
+            <div style={{ marginTop: 12, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <AskBot
+                botSlug="marketing-strategist"
+                label="Steal With Pride"
+                size="small"
+                prefill={`Konkurrent: ${c.name} (${c.country}).\nVad de gör: ${c.what_they_do}\nBudget: ${c.budget}\nBudskap: ${c.message}\n\nVad kan GMF lära av detta? Föreslå 3 konkreta saker vi ska kopiera och göra bättre.`}
+              />
+            </div>
           </div>
         ))}
       </div>

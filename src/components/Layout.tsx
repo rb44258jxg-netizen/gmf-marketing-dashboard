@@ -4,12 +4,12 @@ import { useAuth } from '../lib/auth';
 
 const TABS = [
   { to: '/', label: 'Översikt' },
-  { to: '/personas', label: 'Personas' },
+  { to: '/knowledge', label: 'Knowledge' },
   { to: '/content', label: 'Innehåll' },
-  { to: '/competitors', label: 'Konkurrenter' },
   { to: '/email', label: 'E-post' },
   { to: '/social', label: 'Sociala medier' },
   { to: '/channels', label: 'Kanaler' },
+  { to: '/briefing', label: 'Briefing' },
   { to: '/chat', label: '🤖 Bottar' },
   { to: '/audit', label: 'Audit' },
 ];

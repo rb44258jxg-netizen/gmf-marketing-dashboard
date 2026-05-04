@@ -17,15 +17,26 @@ export default function Chat() {
   const [params, setParams] = useSearchParams();
   const initialBot = params.get('bot') ?? 'marketing-strategist';
   const initialThread = params.get('thread');
+  const prefill = params.get('prefill');
 
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [activeBot, setActiveBot] = useState<string>(initialBot);
   const [activeThread, setActiveThread] = useState<string | null>(initialThread);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState(prefill ?? '');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
+
+  // Konsumera prefill från URL en gång (rensa parametern så den inte återanvänds vid bot-byte)
+  useEffect(() => {
+    if (prefill) {
+      const next = new URLSearchParams(params);
+      next.delete('prefill');
+      setParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const bot = useMemo(() => findBot(activeBot) ?? BOTS[0], [activeBot]);
   const filteredThreads = useMemo(

@@ -37,6 +37,19 @@ const STATUS_LABEL: Record<ContentStatus, { label: string; cls: string }> = {
 
 const STATUS_VALUES: ContentStatus[] = ['utkast', 'granskning', 'redo', 'publicerad'];
 
+const TRACK_LABEL: Record<ContentTrack, { label: string; cls: string; description: string }> = {
+  platform: { label: 'GMF', cls: 'badge-blue', description: 'Plattform — features, ECSPR, varumärke' },
+  case: { label: 'Case', cls: 'badge-purple', description: 'Specifikt investmentcase (t.ex. KEY Experience)' },
+  internal: { label: 'Internt', cls: 'badge-gray', description: 'Strategi-dokument, ej publicerat externt' },
+};
+
+const TRACK_FILTERS: Array<{ value: ContentTrack | 'all'; label: string }> = [
+  { value: 'all', label: 'Alla spår' },
+  { value: 'platform', label: 'GMF' },
+  { value: 'case', label: 'Case' },
+  { value: 'internal', label: 'Internt' },
+];
+
 interface DraftItem {
   title: string;
   type: ContentType;
@@ -58,6 +71,7 @@ const EMPTY_DRAFT: DraftItem = {
 export default function Content() {
   const [items, setItems] = useState<ContentItemRow[] | null>(null);
   const [filter, setFilter] = useState<ContentType | 'all'>('all');
+  const [trackFilter, setTrackFilter] = useState<ContentTrack | 'all'>('all');
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -79,8 +93,12 @@ export default function Content() {
 
   const filtered = useMemo(() => {
     if (!items) return [];
-    return filter === 'all' ? items : items.filter((i) => i.type === filter);
-  }, [items, filter]);
+    return items.filter((i) => {
+      if (filter !== 'all' && i.type !== filter) return false;
+      if (trackFilter !== 'all' && i.track !== trackFilter) return false;
+      return true;
+    });
+  }, [items, filter, trackFilter]);
 
   const counts = useMemo(() => {
     const c = { utkast: 0, granskning: 0, redo: 0, publicerad: 0 };
@@ -242,16 +260,39 @@ export default function Content() {
 
       {error && <div className="auth-error">{error}</div>}
 
-      <div className="content-filters">
-        {TYPE_FILTERS.map((f) => (
-          <button
-            key={f.value}
-            className={'content-filter' + (filter === f.value ? ' active' : '')}
-            onClick={() => setFilter(f.value)}
-          >
-            {f.label}
-          </button>
-        ))}
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 14 }}>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted-foreground)', marginBottom: 4 }}>
+            Spår
+          </div>
+          <div className="content-filters" style={{ marginBottom: 0 }}>
+            {TRACK_FILTERS.map((f) => (
+              <button
+                key={f.value}
+                className={'content-filter' + (trackFilter === f.value ? ' active' : '')}
+                onClick={() => setTrackFilter(f.value)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted-foreground)', marginBottom: 4 }}>
+            Typ
+          </div>
+          <div className="content-filters" style={{ marginBottom: 0 }}>
+            {TYPE_FILTERS.map((f) => (
+              <button
+                key={f.value}
+                className={'content-filter' + (filter === f.value ? ' active' : '')}
+                onClick={() => setFilter(f.value)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="card">
@@ -264,18 +305,19 @@ export default function Content() {
         <div style={{ overflowX: 'auto' }}>
           <div className="content-item header-row">
             <div>Titel</div>
-            <div>Typ</div>
+            <div>Typ / Spår</div>
             <div>Status</div>
             <div>Åtgärd</div>
           </div>
           {filtered.length === 0 && (
             <div className="empty-state">
-              <strong>Inget innehåll än</strong>
-              Klicka "+ Nytt innehåll" för att lägga till.
+              <strong>Inget innehåll matchar filtren</strong>
+              Justera spår/typ ovan eller klicka "+ Nytt innehåll".
             </div>
           )}
           {filtered.map((item) => {
             const t = TYPE_LABEL[item.type];
+            const tr = item.track ? TRACK_LABEL[item.track] : null;
             return (
               <div className="content-item" key={item.id}>
                 <div>
@@ -284,8 +326,9 @@ export default function Content() {
                     <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{item.file}</div>
                   )}
                 </div>
-                <div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <span className={'badge ' + t.cls}>{t.label}</span>
+                  {tr && <span className={'badge ' + tr.cls}>{tr.label}</span>}
                 </div>
                 <div>
                   <select
@@ -303,6 +346,18 @@ export default function Content() {
                   </select>
                 </div>
                 <div className="content-actions">
+                  <AskBot
+                    botSlug="brand-guardian"
+                    label="Granska"
+                    size="small"
+                    prefill={`Granska detta ${TYPE_LABEL[item.type].label.toLowerCase()}-innehåll: "${item.title}"${item.notes ? '\n\n' + item.notes : ''}`}
+                  />
+                  <AskBot
+                    botSlug="content-writer"
+                    label="Förbättra"
+                    size="small"
+                    prefill={`Förbättra denna text: "${item.title}"${item.notes ? '\n\n' + item.notes : ''}`}
+                  />
                   <button className="content-action-btn" onClick={() => openEdit(item)}>
                     Redigera
                   </button>
@@ -362,16 +417,16 @@ export default function Content() {
                 </option>
               ))}
             </select>
-            <label className="persona-input-label">Spår (valfritt)</label>
+            <label className="persona-input-label">Spår</label>
             <select
               className="persona-input"
               value={draft.track}
               onChange={(e) => setDraft({ ...draft, track: e.target.value as ContentTrack | '' })}
             >
-              <option value="">(inget)</option>
-              <option value="case">Case</option>
-              <option value="platform">Plattform</option>
-              <option value="internal">Internt</option>
+              <option value="">— välj spår —</option>
+              <option value="platform">GMF — plattform & feature-uppdateringar</option>
+              <option value="case">Case — specifikt investeringscase</option>
+              <option value="internal">Internt — strategi-dokument</option>
             </select>
             <label className="persona-input-label">Filnamn (valfritt)</label>
             <input
