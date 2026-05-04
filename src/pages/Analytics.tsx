@@ -55,18 +55,16 @@ export default function Analytics() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Ladda items först (snabbt) — render UI direkt. MailerLite hämtas i bakgrunden.
     (async () => {
-      const [itemsRes, mlRes] = await Promise.all([
-        supabase.from('content_items').select('*').order('created_at', { ascending: true }),
-        listCampaigns(50),
-      ]);
+      const itemsRes = await supabase.from('content_items').select('*').order('created_at', { ascending: true });
       setItems((itemsRes.data as Item[]) ?? []);
-      if (isOffline(mlRes)) {
-        setMlOffline(true);
-      } else {
-        setCampaigns(mlRes.data ?? []);
-      }
       setLoading(false);
+    })();
+    (async () => {
+      const mlRes = await listCampaigns(50);
+      if (isOffline(mlRes)) setMlOffline(true);
+      else setCampaigns(mlRes.data ?? []);
     })();
   }, []);
 

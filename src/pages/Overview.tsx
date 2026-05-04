@@ -33,36 +33,40 @@ export default function Overview() {
   });
 
   useEffect(() => {
+    // Ladda Supabase-räkningar först (snabbt). MailerLite parallellt utan att blockera.
     (async () => {
-      const [personas, content, drafts, ready, competitors, count, camps] = await Promise.all([
+      const [personas, content, drafts, ready, competitors] = await Promise.all([
         supabase.from('personas').select('*', { count: 'exact', head: true }),
         supabase.from('content_items').select('*', { count: 'exact', head: true }),
         supabase.from('content_items').select('*', { count: 'exact', head: true }).eq('status', 'utkast'),
         supabase.from('content_items').select('*', { count: 'exact', head: true }).eq('status', 'redo'),
         supabase.from('competitors').select('*', { count: 'exact', head: true }),
-        getSubscriberCount(),
-        listCampaigns(25),
       ]);
-
-      const mlOffline = isOffline(count) || isOffline(camps);
-      const subs = !mlOffline && !isOffline(count) ? count.total ?? count.meta?.total ?? 0 : null;
-      const list = !mlOffline && !isOffline(camps) ? camps.data ?? [] : [];
-      const sentList = list.filter((c) => c.status === 'sent');
-      const bestOpen = sentList.reduce((m, c) => Math.max(m, c.stats?.open_rate?.float ?? 0), 0);
-
-      setS({
+      setS((prev) => ({
+        ...prev,
         loading: false,
         personas: personas.count ?? 0,
         content: content.count ?? 0,
         drafts: drafts.count ?? 0,
         ready: ready.count ?? 0,
         competitors: competitors.count ?? 0,
+      }));
+    })();
+    (async () => {
+      const [count, camps] = await Promise.all([getSubscriberCount(), listCampaigns(25)]);
+      const mlOffline = isOffline(count) || isOffline(camps);
+      const subs = !mlOffline && !isOffline(count) ? count.total ?? count.meta?.total ?? 0 : null;
+      const list = !mlOffline && !isOffline(camps) ? camps.data ?? [] : [];
+      const sentList = list.filter((c) => c.status === 'sent');
+      const bestOpen = sentList.reduce((m, c) => Math.max(m, c.stats?.open_rate?.float ?? 0), 0);
+      setS((prev) => ({
+        ...prev,
         subs,
         bestOpen,
         sent: sentList.length,
         latest: sentList[0] ?? null,
         mlOffline,
-      });
+      }));
     })();
   }, []);
 

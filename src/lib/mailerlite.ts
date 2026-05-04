@@ -33,8 +33,12 @@ export interface MLOffline {
 
 async function call<T>(op: string, params: Record<string, string> = {}): Promise<T | MLOffline> {
   const qs = new URLSearchParams({ op, ...params }).toString();
+  // 12s client-timeout så hängd serverless-funktion inte fryser UI:t
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
   try {
-    const res = await fetch(`/api/mailerlite?${qs}`);
+    const res = await fetch(`/api/mailerlite?${qs}`, { signal: controller.signal });
+    clearTimeout(timer);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       return {
@@ -46,9 +50,14 @@ async function call<T>(op: string, params: Record<string, string> = {}): Promise
     }
     return (await res.json()) as T;
   } catch (e) {
+    clearTimeout(timer);
+    const err = e as Error;
+    if (err.name === 'AbortError') {
+      return { offline: true, reason: 'MailerLite-proxyn svarade inte inom 12 sek.' };
+    }
     return {
       offline: true,
-      reason: `Kunde inte nå /api/mailerlite — ${String(e)}. (Lokal dev har ingen proxy; testa på Vercel-URL.)`,
+      reason: `Kunde inte nå /api/mailerlite — ${String(e)}.`,
     };
   }
 }
