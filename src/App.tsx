@@ -12,6 +12,8 @@ import Channels from './pages/Channels';
 import Chat from './pages/Chat';
 import Briefing from './pages/Briefing';
 import Cases from './pages/Cases';
+import Calendar from './pages/Calendar';
+import Analytics from './pages/Analytics';
 import Audit from './pages/Audit';
 
 export default function App() {
@@ -60,6 +62,8 @@ export default function App() {
         <Route path="/chat" element={<Chat />} />
         <Route path="/briefing" element={<Briefing />} />
         <Route path="/cases" element={<Cases />} />
+        <Route path="/calendar" element={<Calendar />} />
+        <Route path="/analytics" element={<Analytics />} />
         <Route path="/audit" element={<Audit />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
