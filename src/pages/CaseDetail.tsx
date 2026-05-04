@@ -27,6 +27,8 @@ export default function CaseDetail({ caseId }: { caseId: string }) {
   const [draft, setDraft] = useState<Partial<Case>>({});
   const [contentCount, setContentCount] = useState<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pollRef = useRef<number | null>(null);
+  const pendingKey = `case-plan-pending-${caseId}`;
 
   async function load() {
     try {
@@ -47,8 +49,67 @@ export default function CaseDetail({ caseId }: { caseId: string }) {
 
   useEffect(() => {
     load();
+    // Vid mount: om vi har sparat "generering pågår" i localStorage, återuppta polling
+    const pending = localStorage.getItem(pendingKey);
+    if (pending) {
+      const startedAt = parseInt(pending, 10);
+      const ageSec = (Date.now() - startedAt) / 1000;
+      if (ageSec < 120) {
+        setGenerating(true);
+        startPolling(startedAt);
+      } else {
+        localStorage.removeItem(pendingKey);
+      }
+    }
+
+    // Vid window focus — refresha case (om plan klart i bakgrunden)
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      if (pollRef.current) window.clearInterval(pollRef.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseId]);
+
+  function startPolling(startedAt: number) {
+    if (pollRef.current) window.clearInterval(pollRef.current);
+    pollRef.current = window.setInterval(async () => {
+      const ageSec = (Date.now() - startedAt) / 1000;
+      try {
+        const fresh = await getCase(caseId);
+        if (fresh?.plan_generated_at && (!c?.plan_generated_at || fresh.plan_generated_at !== c.plan_generated_at)) {
+          // Klart!
+          setC(fresh);
+          setGenerating(false);
+          localStorage.removeItem(pendingKey);
+          if (pollRef.current) {
+            window.clearInterval(pollRef.current);
+            pollRef.current = null;
+          }
+          await logAudit({
+            action: 'case.plan.generate',
+            entity_type: 'case',
+            entity_id: caseId,
+            before: null,
+            after: { plan_summary: fresh.marketing_plan?.summary ?? '' },
+          });
+        }
+      } catch {
+        // ignorera transient
+      }
+      if (ageSec > 110) {
+        // Timeout
+        setGenerating(false);
+        setError('Planen tog för lång tid att generera. Prova igen — eller ladda upp färre/mindre dokument.');
+        localStorage.removeItem(pendingKey);
+        if (pollRef.current) {
+          window.clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+      }
+    }, 4000);
+  }
 
   if (c === undefined) {
     return (
@@ -118,23 +179,27 @@ export default function CaseDetail({ caseId }: { caseId: string }) {
   async function handleGeneratePlan() {
     setGenerating(true);
     setError(null);
-    try {
-      const result = await generateMarketingPlan(caseId);
-      if ('error' in result) {
+    const startedAt = Date.now();
+    localStorage.setItem(pendingKey, String(startedAt));
+    startPolling(startedAt);
+
+    // Trigga genereringen (vi awaitar inte — pollingen hittar resultatet)
+    generateMarketingPlan(caseId).then((result) => {
+      if (result && 'error' in result) {
+        // Servern svarade direkt med fel — visa det
         setError(result.error);
-      } else {
-        await logAudit({
-          action: 'case.plan.generate',
-          entity_type: 'case',
-          entity_id: caseId,
-          before: null,
-          after: { plan_summary: result.summary ?? '' },
-        });
-        await load();
+        setGenerating(false);
+        localStorage.removeItem(pendingKey);
+        if (pollRef.current) {
+          window.clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+      } else if (result) {
+        // Servern svarade med klart resultat — pollingen tar tag i det också
+        // men vi laddar direkt också för snabb UI-uppdatering
+        load();
       }
-    } finally {
-      setGenerating(false);
-    }
+    });
   }
 
   async function startEdit() {
@@ -208,11 +273,13 @@ export default function CaseDetail({ caseId }: { caseId: string }) {
           <AskBot
             botSlug="marketing-strategist"
             label="Diskutera detta case"
+            variant="on-dark"
             prefill={`Case: ${c.name} (${c.sector}). ${c.description}\n\nSökt belopp: ${c.target_amount_sek ? (c.target_amount_sek / 1_000_000).toFixed(1) + ' MSEK' : 'okänt'}. Stänger: ${c.emission_close ?? 'ej satt'}.\n\nVad ska vi prioritera närmsta veckorna?`}
           />
           <AskBot
             botSlug="content-writer"
             label="Skriv för detta case"
+            variant="on-dark"
             prefill={`Skriv ett kort innehåll om caset "${c.name}" (${c.sector}). ${c.description}. Föreslå 3 alternativ — t.ex. ett LinkedIn-inlägg, en e-post-rubrik och en blogg-hook.`}
           />
         </div>

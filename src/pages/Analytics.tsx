@@ -94,6 +94,7 @@ export default function Analytics() {
           <AskBot
             botSlug="analytics-reporter"
             label="Analysera dessa siffror"
+            variant="on-dark"
             prefill={`Analysera vår nuvarande pipeline:\n\n- ${items.length} content-items totalt\n- Per typ: ${JSON.stringify(byType)}\n- Per status: ${JSON.stringify(byStatus)}\n- Per spår: ${JSON.stringify(byTrack)}\n${campaigns.length > 0 ? `- ${campaigns.length} MailerLite-kampanjer` : ''}\n\nVad ser du? Topp-3 insikter och vad ska vi prioritera?`}
           />
         </div>

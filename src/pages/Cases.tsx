@@ -118,7 +118,7 @@ function CaseList() {
           Onboarda nya bolag, ladda upp dokument och låt Marketing Strategist generera marknadsplan för deras emission.
         </div>
         <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <AskBot botSlug="marketing-strategist" label="Diskutera case-portfölj" />
+          <AskBot botSlug="marketing-strategist" label="Diskutera case-portfölj" variant="on-dark" />
           <button
             className="btn-primary"
             style={{ background: 'rgba(255,255,255,0.2)', borderColor: 'rgba(255,255,255,0.3)' }}

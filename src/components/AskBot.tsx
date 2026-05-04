@@ -8,23 +8,39 @@ interface Props {
   prefill?: string;
   /** Litet stilval — kompakt knapp för inline-användning på items */
   size?: 'normal' | 'small';
+  /** "on-dark" används inuti card-hero/mörka bakgrunder för läsbarhet */
+  variant?: 'on-light' | 'on-dark';
 }
 
-export default function AskBot({ botSlug, label, prefill, size = 'normal' }: Props) {
+export default function AskBot({ botSlug, label, prefill, size = 'normal', variant = 'on-light' }: Props) {
   const bot = findBot(botSlug);
   if (!bot) return null;
   const params = new URLSearchParams({ bot: bot.slug });
   if (prefill) params.set('prefill', prefill);
   const isSmall = size === 'small';
+  const isDark = variant === 'on-dark';
+
+  // På ljus bakgrund: bot.color som accent
+  // På mörk bakgrund: vit text + halvtransparent vit bg så bot.color inte försvinner
+  const style: React.CSSProperties = isDark
+    ? {
+        background: 'rgba(255, 255, 255, 0.18)',
+        borderColor: 'rgba(255, 255, 255, 0.32)',
+        color: '#ffffff',
+        backdropFilter: 'blur(4px)',
+        fontWeight: 600,
+      }
+    : {
+        background: bot.color + '18',
+        borderColor: bot.color + '50',
+        color: bot.color,
+      };
+
   return (
     <Link
       to={`/chat?${params.toString()}`}
       className={isSmall ? 'content-action-btn' : 'header-link'}
-      style={
-        isSmall
-          ? { background: bot.color + '15', borderColor: bot.color + '40', color: bot.color }
-          : { background: bot.color + '15', borderColor: bot.color + '40', color: bot.color }
-      }
+      style={style}
       title={bot.description}
     >
       <span>{bot.icon}</span>

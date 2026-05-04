@@ -60,7 +60,7 @@ export default async function handler(req: Request): Promise<Response> {
       },
       body: JSON.stringify({
         model: ANTHROPIC_MODEL,
-        max_tokens: 3500,
+        max_tokens: 2400,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
       }),

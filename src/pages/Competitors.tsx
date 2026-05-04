@@ -117,7 +117,7 @@ export default function Competitors() {
         <div className="card-hero-title">Steal With Pride</div>
         <div className="card-hero-sub">Det bästa från varje konkurrent — vad vi kopierar och gör bättre.</div>
         <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <AskBot botSlug="marketing-strategist" label="Fråga om konkurrenter" />
+          <AskBot botSlug="marketing-strategist" label="Fråga om konkurrenter" variant="on-dark" />
         </div>
       </div>
 

@@ -54,6 +54,7 @@ export default function Briefing() {
           <AskBot
             botSlug="marketing-strategist"
             label="Be om special-briefing"
+            variant="on-dark"
             prefill="Ge mig en briefing nu för senaste 7 dagarna — vad har hänt och vad ska prioriteras närmsta veckan?"
           />
         </div>

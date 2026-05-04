@@ -351,9 +351,9 @@ export default function Content() {
           Allt producerat marknadsmaterial. Granska, redigera och godkänn innan publicering.
         </div>
         <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <AskBot botSlug="content-writer" label="Skriv nytt innehåll" />
-          <AskBot botSlug="brand-guardian" label="Granska text" />
-          <AskBot botSlug="seo-strategist" label="SEO-brief" />
+          <AskBot botSlug="content-writer" label="Skriv nytt innehåll" variant="on-dark" />
+          <AskBot botSlug="brand-guardian" label="Granska text" variant="on-dark" />
+          <AskBot botSlug="seo-strategist" label="SEO-brief" variant="on-dark" />
         </div>
       </div>
 

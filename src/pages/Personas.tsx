@@ -121,7 +121,7 @@ export default function Personas() {
           Redigera personas direkt — ändringar sparas i Supabase och loggas i audit.
         </div>
         <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <AskBot botSlug="marketing-strategist" label="Fråga om personas" />
+          <AskBot botSlug="marketing-strategist" label="Fråga om personas" variant="on-dark" />
         </div>
       </div>
 
