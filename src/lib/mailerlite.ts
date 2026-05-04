@@ -68,3 +68,44 @@ export function listAutomations(limit = 25) {
 export function isOffline<T>(r: T | MLOffline): r is MLOffline {
   return typeof r === 'object' && r !== null && (r as MLOffline).offline === true;
 }
+
+export interface CreateCampaignInput {
+  name: string;
+  subject: string;
+  from_name?: string;
+  from_email?: string;
+  content: string;
+}
+
+export async function createCampaign(input: CreateCampaignInput): Promise<
+  { campaign: { id: string; name: string; dashboard_url?: string } } | { error: string }
+> {
+  try {
+    const res = await fetch('/api/mailerlite', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ op: 'create_campaign', ...input }),
+    });
+    const raw = await res.text();
+    let body: Record<string, unknown> = {};
+    try {
+      body = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return { error: `Icke-JSON svar: ${raw.slice(0, 100)}` };
+    }
+    if (!res.ok) {
+      return { error: ((body.error as string) ?? `HTTP ${res.status}`) + ` ${JSON.stringify(body).slice(0, 200)}` };
+    }
+    const data = body.data as { id: string; name: string; settings?: { dashboard_url?: string } } | undefined;
+    if (!data) return { error: 'unexpected response shape' };
+    return {
+      campaign: {
+        id: data.id,
+        name: data.name,
+        dashboard_url: data.settings?.dashboard_url ?? `https://dashboard.mailerlite.com/campaigns/${data.id}/edit`,
+      },
+    };
+  } catch (e) {
+    return { error: 'fetch failed: ' + String(e) };
+  }
+}

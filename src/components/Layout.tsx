@@ -4,6 +4,7 @@ import { useAuth } from '../lib/auth';
 
 const TABS = [
   { to: '/', label: 'Översikt' },
+  { to: '/cases', label: 'Cases' },
   { to: '/knowledge', label: 'Knowledge' },
   { to: '/content', label: 'Innehåll' },
   { to: '/email', label: 'E-post' },

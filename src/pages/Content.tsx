@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { logAudit } from '../lib/audit';
 import AskBot from '../components/AskBot';
+import { autoReviewWithBrandGuardian, listComments, addUserComment, type ContentComment } from '../lib/comments';
+import { createCampaign } from '../lib/mailerlite';
 import type {
   ContentItemInsert,
   ContentItemRow,
@@ -55,6 +58,7 @@ interface DraftItem {
   type: ContentType;
   status: ContentStatus;
   track: ContentTrack | '';
+  case_id: string;
   file: string;
   notes: string;
 }
@@ -64,14 +68,27 @@ const EMPTY_DRAFT: DraftItem = {
   type: 'blogg',
   status: 'utkast',
   track: '',
+  case_id: '',
   file: '',
   notes: '',
 };
 
+interface CaseRef {
+  id: string;
+  name: string;
+}
+
 export default function Content() {
+  const [params] = useSearchParams();
+  const caseFilterParam = params.get('case');
   const [items, setItems] = useState<ContentItemRow[] | null>(null);
+  const [cases, setCases] = useState<CaseRef[]>([]);
   const [filter, setFilter] = useState<ContentType | 'all'>('all');
   const [trackFilter, setTrackFilter] = useState<ContentTrack | 'all'>('all');
+  const [expandedCommentsId, setExpandedCommentsId] = useState<string | null>(null);
+  const [comments, setComments] = useState<ContentComment[]>([]);
+  const [commentDraft, setCommentDraft] = useState('');
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -79,12 +96,13 @@ export default function Content() {
   const [busy, setBusy] = useState(false);
 
   async function load() {
-    const { data, error: err } = await supabase
-      .from('content_items')
-      .select('*')
-      .order('created_at', { ascending: false });
+    const [{ data, error: err }, caseRes] = await Promise.all([
+      supabase.from('content_items').select('*').order('created_at', { ascending: false }),
+      supabase.from('cases').select('id, name').order('name'),
+    ]);
     if (err) setError(err.message);
     else setItems(data as ContentItemRow[]);
+    setCases((caseRes.data as CaseRef[]) ?? []);
   }
 
   useEffect(() => {
@@ -96,9 +114,11 @@ export default function Content() {
     return items.filter((i) => {
       if (filter !== 'all' && i.type !== filter) return false;
       if (trackFilter !== 'all' && i.track !== trackFilter) return false;
+      if (caseFilterParam && (i as ContentItemRow & { case_id?: string | null }).case_id !== caseFilterParam)
+        return false;
       return true;
     });
-  }, [items, filter, trackFilter]);
+  }, [items, filter, trackFilter, caseFilterParam]);
 
   const counts = useMemo(() => {
     const c = { utkast: 0, granskning: 0, redo: 0, publicerad: 0 };
@@ -121,6 +141,7 @@ export default function Content() {
       type: item.type,
       status: item.status,
       track: item.track ?? '',
+      case_id: (item as ContentItemRow & { case_id?: string | null }).case_id ?? '',
       file: item.file ?? '',
       notes: item.notes ?? '',
     });
@@ -147,9 +168,10 @@ export default function Content() {
       type: draft.type,
       status: draft.status,
       track: draft.track ? (draft.track as ContentTrack) : null,
+      case_id: draft.case_id || null,
       file: draft.file.trim() || null,
       notes: draft.notes.trim() || null,
-    };
+    } as ContentItemInsert & { case_id: string | null };
     if (editingId) {
       const before = items?.find((i) => i.id === editingId);
       const update: ContentItemUpdate = payload;
@@ -216,6 +238,83 @@ export default function Content() {
       after: data,
     });
     await load();
+
+    // Approval workflow: när status sätts till "granskning", auto-trigga Brand Guardian
+    if (status === 'granskning' && before.status !== 'granskning') {
+      setBusyId(item.id);
+      try {
+        await autoReviewWithBrandGuardian({
+          id: item.id,
+          title: item.title,
+          notes: item.notes,
+          type: item.type,
+        });
+      } finally {
+        setBusyId(null);
+      }
+    }
+  }
+
+  async function loadComments(itemId: string) {
+    if (expandedCommentsId === itemId) {
+      setExpandedCommentsId(null);
+      setComments([]);
+      return;
+    }
+    setExpandedCommentsId(itemId);
+    setCommentDraft('');
+    try {
+      const c = await listComments(itemId);
+      setComments(c);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function postComment() {
+    if (!expandedCommentsId || !commentDraft.trim()) return;
+    try {
+      await addUserComment(expandedCommentsId, commentDraft.trim());
+      setCommentDraft('');
+      const c = await listComments(expandedCommentsId);
+      setComments(c);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function pushToMailerLite(item: ContentItemRow) {
+    if (item.type !== 'email') return;
+    setBusyId(item.id);
+    try {
+      const result = await createCampaign({
+        name: item.title,
+        subject: item.title,
+        content: item.notes ?? '<p>(Body ej angivet ännu — fyll i i MailerLite)</p>',
+      });
+      if ('error' in result) {
+        setError('MailerLite: ' + result.error);
+        return;
+      }
+      await supabase
+        .from('content_items')
+        .update({
+          mailerlite_campaign_id: result.campaign.id,
+          mailerlite_dashboard_url: result.campaign.dashboard_url,
+        })
+        .eq('id', item.id);
+      await logAudit({
+        action: 'content.mailerlite.create_draft',
+        entity_type: 'content_item',
+        entity_id: item.id,
+        before: null,
+        after: { campaign_id: result.campaign.id },
+      });
+      await load();
+      if (result.campaign.dashboard_url) window.open(result.campaign.dashboard_url, '_blank');
+    } finally {
+      setBusyId(null);
+    }
   }
 
   async function remove(item: ContentItemRow) {
@@ -358,6 +457,30 @@ export default function Content() {
                     size="small"
                     prefill={`Förbättra denna text: "${item.title}"${item.notes ? '\n\n' + item.notes : ''}`}
                   />
+                  {item.type === 'email' &&
+                    (item as ContentItemRow & { mailerlite_dashboard_url?: string }).mailerlite_dashboard_url ? (
+                      <a
+                        className="content-action-btn"
+                        href={(item as ContentItemRow & { mailerlite_dashboard_url?: string }).mailerlite_dashboard_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ background: 'var(--green-bg)', color: '#0d6e54', borderColor: 'var(--green)' }}
+                      >
+                        ML →
+                      </a>
+                    ) : item.type === 'email' ? (
+                      <button
+                        className="content-action-btn"
+                        onClick={() => pushToMailerLite(item)}
+                        disabled={busyId === item.id}
+                        title="Skapa utkast i MailerLite"
+                      >
+                        {busyId === item.id ? '…' : '→ ML'}
+                      </button>
+                    ) : null}
+                  <button className="content-action-btn" onClick={() => loadComments(item.id)}>
+                    💬
+                  </button>
                   <button className="content-action-btn" onClick={() => openEdit(item)}>
                     Redigera
                   </button>
@@ -365,6 +488,52 @@ export default function Content() {
                     Radera
                   </button>
                 </div>
+                {expandedCommentsId === item.id && (
+                  <div style={{ gridColumn: '1 / -1', padding: '12px 0', borderTop: '1px solid var(--border)', marginTop: 8 }}>
+                    {comments.length === 0 ? (
+                      <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
+                        Inga kommentarer än. När statusen sätts till "Granskning" kommenterar Brand Guardian automatiskt.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {comments.map((cm) => (
+                          <div
+                            key={cm.id}
+                            style={{
+                              padding: 10,
+                              background: cm.author_kind === 'bot' ? 'var(--mint)' : 'var(--soft-cloud)',
+                              borderRadius: 8,
+                              fontSize: 12,
+                            }}
+                          >
+                            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--deep-teal)', marginBottom: 4 }}>
+                              {cm.author_kind === 'bot' ? `🤖 ${cm.bot_slug}` : `👤 ${cm.author_email ?? 'okänd'}`}
+                              <span style={{ marginLeft: 8, color: 'var(--muted-foreground)', fontWeight: 500 }}>
+                                {new Date(cm.created_at).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' })}
+                              </span>
+                            </div>
+                            <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{cm.body}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                      <input
+                        className="persona-input"
+                        style={{ marginBottom: 0, flex: 1 }}
+                        value={commentDraft}
+                        onChange={(e) => setCommentDraft(e.target.value)}
+                        placeholder="Lägg till kommentar…"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') postComment();
+                        }}
+                      />
+                      <button className="btn-primary" onClick={postComment} disabled={!commentDraft.trim()}>
+                        Posta
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -427,6 +596,19 @@ export default function Content() {
               <option value="platform">GMF — plattform & feature-uppdateringar</option>
               <option value="case">Case — specifikt investeringscase</option>
               <option value="internal">Internt — strategi-dokument</option>
+            </select>
+            <label className="persona-input-label">Koppla till case (valfritt)</label>
+            <select
+              className="persona-input"
+              value={draft.case_id}
+              onChange={(e) => setDraft({ ...draft, case_id: e.target.value })}
+            >
+              <option value="">— inget case —</option>
+              {cases.map((cse) => (
+                <option key={cse.id} value={cse.id}>
+                  {cse.name}
+                </option>
+              ))}
             </select>
             <label className="persona-input-label">Filnamn (valfritt)</label>
             <input
