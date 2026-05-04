@@ -149,24 +149,32 @@ export default function Overview() {
 
       <div className="card">
         <div className="card-title">Snabbåtgärder</div>
-        <Link to="/personas" className="header-link" style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
-          <span>Personas — {s.loading ? '…' : s.personas} profiler</span>
+        <Link to="/cases" className="header-link" style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
+          <span>🎯 Cases — bolagsmarknadsföring</span>
+          <span>→</span>
+        </Link>
+        <Link to="/knowledge" className="header-link" style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
+          <span>Knowledge — {s.loading ? '…' : s.personas} personas + {s.competitors} konkurrenter</span>
           <span>→</span>
         </Link>
         <Link to="/content" className="header-link" style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
           <span>Content library — {s.drafts} utkast, {s.ready} redo</span>
           <span>→</span>
         </Link>
-        <Link to="/competitors" className="header-link" style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
-          <span>Konkurrenter — {s.competitors} bevakade</span>
+        <Link to="/calendar" className="header-link" style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
+          <span>📅 Kalender</span>
           <span>→</span>
         </Link>
-        <Link to="/email" className="header-link" style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
-          <span>E-postkampanjer (MailerLite)</span>
+        <Link to="/analytics" className="header-link" style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
+          <span>📊 Analytics</span>
           <span>→</span>
         </Link>
-        <Link to="/audit" className="header-link" style={{ width: '100%', justifyContent: 'space-between' }}>
-          <span>Audit-logg</span>
+        <Link to="/briefing" className="header-link" style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
+          <span>📋 Veckobriefing</span>
+          <span>→</span>
+        </Link>
+        <Link to="/chat" className="header-link" style={{ width: '100%', justifyContent: 'space-between' }}>
+          <span>🤖 Chatta med marketing-bottar</span>
           <span>→</span>
         </Link>
       </div>
