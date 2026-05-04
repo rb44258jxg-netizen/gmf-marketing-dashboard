@@ -18,6 +18,8 @@ export interface Case {
   logo_url: string | null;
   marketing_plan: MarketingPlan | null;
   plan_generated_at: string | null;
+  extracted_facts: CompanyFacts | null;
+  facts_extracted_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -44,6 +46,21 @@ export interface MarketingPlan {
   phases?: CasePhase[];
   risks?: string[];
   success_metrics?: string[];
+  raw_text?: string;
+  parse_error?: boolean;
+}
+
+export interface CompanyFacts {
+  bolagsbeskrivning?: string;
+  problem?: string;
+  lösning?: string;
+  team?: Array<{ namn?: string; roll?: string; bakgrund?: string }>;
+  marknad?: { storlek?: string; tillväxt?: string; kunder?: string };
+  traction?: string[];
+  financials?: { intäkter_idag?: string; prognos?: string; användning_av_kapital?: string };
+  exit_strategi?: string;
+  usp?: string;
+  risker?: string[];
   raw_text?: string;
   parse_error?: boolean;
 }
@@ -169,8 +186,20 @@ export async function deleteDocument(doc: CaseDocument) {
 }
 
 export async function generateMarketingPlan(caseId: string): Promise<MarketingPlan | { error: string }> {
+  return callApi<MarketingPlan>('/api/case-plan', caseId, 'plan');
+}
+
+export async function extractCompanyFacts(caseId: string): Promise<CompanyFacts | { error: string }> {
+  return callApi<CompanyFacts>('/api/case-extract', caseId, 'facts');
+}
+
+async function callApi<T>(
+  endpoint: string,
+  caseId: string,
+  resultKey: 'plan' | 'facts',
+): Promise<T | { error: string }> {
   try {
-    const res = await fetch('/api/case-plan', {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ case_id: caseId }),
@@ -185,7 +214,7 @@ export async function generateMarketingPlan(caseId: string): Promise<MarketingPl
     if (!res.ok) {
       return { error: (body.error as string) ?? `HTTP ${res.status}` };
     }
-    return body.plan as MarketingPlan;
+    return body[resultKey] as T;
   } catch (e) {
     return { error: 'fetch failed: ' + String(e) };
   }

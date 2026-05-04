@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   deleteCase,
   deleteDocument,
+  extractCompanyFacts,
   generateMarketingPlan,
   getCase,
   getDocumentSignedUrl,
@@ -12,6 +13,7 @@ import {
   uploadDocument,
   type Case,
   type CaseDocument,
+  type CompanyFacts,
   type MarketingPlan,
 } from '../lib/cases';
 import { logAudit } from '../lib/audit';
@@ -23,12 +25,17 @@ export default function CaseDetail({ caseId }: { caseId: string }) {
   const [docs, setDocs] = useState<CaseDocument[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [genElapsed, setGenElapsed] = useState(0);
+  const [extractElapsed, setExtractElapsed] = useState(0);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Partial<Case>>({});
   const [contentCount, setContentCount] = useState<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<number | null>(null);
+  const extractPollRef = useRef<number | null>(null);
   const pendingKey = `case-plan-pending-${caseId}`;
+  const extractKey = `case-extract-pending-${caseId}`;
 
   async function load() {
     try {
@@ -62,24 +69,39 @@ export default function CaseDetail({ caseId }: { caseId: string }) {
       }
     }
 
+    // Återuppta extract-polling om vi har en pågående
+    const extractPending = localStorage.getItem(extractKey);
+    if (extractPending) {
+      const startedAt = parseInt(extractPending, 10);
+      const ageSec = (Date.now() - startedAt) / 1000;
+      if (ageSec < 120) {
+        setExtracting(true);
+        startExtractPolling(startedAt);
+      } else {
+        localStorage.removeItem(extractKey);
+      }
+    }
+
     // Vid window focus — refresha case (om plan klart i bakgrunden)
     const onFocus = () => load();
     window.addEventListener('focus', onFocus);
     return () => {
       window.removeEventListener('focus', onFocus);
       if (pollRef.current) window.clearInterval(pollRef.current);
+      if (extractPollRef.current) window.clearInterval(extractPollRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseId]);
 
   function startPolling(startedAt: number) {
     if (pollRef.current) window.clearInterval(pollRef.current);
+    setGenElapsed(Math.floor((Date.now() - startedAt) / 1000));
     pollRef.current = window.setInterval(async () => {
       const ageSec = (Date.now() - startedAt) / 1000;
+      setGenElapsed(Math.floor(ageSec));
       try {
         const fresh = await getCase(caseId);
         if (fresh?.plan_generated_at && (!c?.plan_generated_at || fresh.plan_generated_at !== c.plan_generated_at)) {
-          // Klart!
           setC(fresh);
           setGenerating(false);
           localStorage.removeItem(pendingKey);
@@ -99,7 +121,6 @@ export default function CaseDetail({ caseId }: { caseId: string }) {
         // ignorera transient
       }
       if (ageSec > 110) {
-        // Timeout
         setGenerating(false);
         setError('Planen tog för lång tid att generera. Prova igen — eller ladda upp färre/mindre dokument.');
         localStorage.removeItem(pendingKey);
@@ -108,7 +129,49 @@ export default function CaseDetail({ caseId }: { caseId: string }) {
           pollRef.current = null;
         }
       }
-    }, 4000);
+    }, 2000);
+  }
+
+  function startExtractPolling(startedAt: number) {
+    if (extractPollRef.current) window.clearInterval(extractPollRef.current);
+    setExtractElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    extractPollRef.current = window.setInterval(async () => {
+      const ageSec = (Date.now() - startedAt) / 1000;
+      setExtractElapsed(Math.floor(ageSec));
+      try {
+        const fresh = await getCase(caseId);
+        if (
+          fresh?.facts_extracted_at &&
+          (!c?.facts_extracted_at || fresh.facts_extracted_at !== c.facts_extracted_at)
+        ) {
+          setC(fresh);
+          setExtracting(false);
+          localStorage.removeItem(extractKey);
+          if (extractPollRef.current) {
+            window.clearInterval(extractPollRef.current);
+            extractPollRef.current = null;
+          }
+          await logAudit({
+            action: 'case.facts.extract',
+            entity_type: 'case',
+            entity_id: caseId,
+            before: null,
+            after: { extracted_at: fresh.facts_extracted_at },
+          });
+        }
+      } catch {
+        // ignorera
+      }
+      if (ageSec > 110) {
+        setExtracting(false);
+        setError('Dokumentanalysen tog för lång tid. Prova igen, eller ladda upp ett mindre dokument.');
+        localStorage.removeItem(extractKey);
+        if (extractPollRef.current) {
+          window.clearInterval(extractPollRef.current);
+          extractPollRef.current = null;
+        }
+      }
+    }, 2000);
   }
 
   if (c === undefined) {
@@ -183,10 +246,8 @@ export default function CaseDetail({ caseId }: { caseId: string }) {
     localStorage.setItem(pendingKey, String(startedAt));
     startPolling(startedAt);
 
-    // Trigga genereringen (vi awaitar inte — pollingen hittar resultatet)
     generateMarketingPlan(caseId).then((result) => {
       if (result && 'error' in result) {
-        // Servern svarade direkt med fel — visa det
         setError(result.error);
         setGenerating(false);
         localStorage.removeItem(pendingKey);
@@ -195,8 +256,28 @@ export default function CaseDetail({ caseId }: { caseId: string }) {
           pollRef.current = null;
         }
       } else if (result) {
-        // Servern svarade med klart resultat — pollingen tar tag i det också
-        // men vi laddar direkt också för snabb UI-uppdatering
+        load();
+      }
+    });
+  }
+
+  async function handleExtractFacts() {
+    setExtracting(true);
+    setError(null);
+    const startedAt = Date.now();
+    localStorage.setItem(extractKey, String(startedAt));
+    startExtractPolling(startedAt);
+
+    extractCompanyFacts(caseId).then((result) => {
+      if (result && 'error' in result) {
+        setError('Extrahering: ' + result.error);
+        setExtracting(false);
+        localStorage.removeItem(extractKey);
+        if (extractPollRef.current) {
+          window.clearInterval(extractPollRef.current);
+          extractPollRef.current = null;
+        }
+      } else if (result) {
         load();
       }
     });
@@ -434,6 +515,35 @@ export default function CaseDetail({ caseId }: { caseId: string }) {
 
           <div className="card">
             <div className="card-title">
+              Bolagsfakta
+              <button
+                className="btn-primary"
+                onClick={handleExtractFacts}
+                disabled={extracting || docs.filter((d) => (d.file_type ?? '').includes('pdf')).length === 0}
+                title="AI läser uppladdat pitch deck och extraherar bolagsfakta"
+              >
+                {extracting
+                  ? 'Analyserar…'
+                  : c.extracted_facts
+                  ? '🔄 Analysera om'
+                  : '📄 Analysera dokument'}
+              </button>
+            </div>
+            {extracting && (
+              <ProgressBar elapsed={extractElapsed} estimate={45} label="AI läser ditt pitch deck…" />
+            )}
+            {!c.extracted_facts && !extracting ? (
+              <div className="empty-state">
+                <strong>Inga bolagsfakta extraherade än</strong>
+                Ladda upp ett pitch deck (PDF) och klicka "Analysera dokument" — AI läser och fyller i bolagsbeskrivning, team, marknad, traction, financials med mera.
+              </div>
+            ) : c.extracted_facts ? (
+              <FactsView facts={c.extracted_facts} extractedAt={c.facts_extracted_at} />
+            ) : null}
+          </div>
+
+          <div className="card">
+            <div className="card-title">
               Marknadsplan
               <button
                 className="btn-primary"
@@ -441,18 +551,28 @@ export default function CaseDetail({ caseId }: { caseId: string }) {
                 disabled={generating}
                 title="AI genererar/uppdaterar marknadsplanen"
               >
-                {generating ? 'Genererar (60 sek)…' : c.marketing_plan ? 'Generera om' : 'Generera plan'}
+                {generating ? 'Genererar…' : c.marketing_plan ? '🔄 Generera om' : '✨ Generera plan'}
               </button>
             </div>
-            {!c.marketing_plan ? (
+            {generating && (
+              <ProgressBar
+                elapsed={genElapsed}
+                estimate={45}
+                label={
+                  c.extracted_facts
+                    ? 'Marketing Strategist använder bolagsfakta för att skriva planen…'
+                    : 'Marketing Strategist skriver planen…'
+                }
+              />
+            )}
+            {!c.marketing_plan && !generating ? (
               <div className="empty-state">
                 <strong>Ingen plan genererad än</strong>
-                Klicka "Generera plan" — Marketing Strategist + Campaign Planner producerar en strukturerad
-                tidsplan baserat på case-info och dokument.
+                Klicka "Generera plan" — Marketing Strategist producerar en strukturerad tidsplan baserat på case-info{c.extracted_facts ? ' och extraherade bolagsfakta' : ' och dokument'}.
               </div>
-            ) : (
+            ) : c.marketing_plan ? (
               <PlanView plan={c.marketing_plan} planGeneratedAt={c.plan_generated_at} />
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -492,6 +612,169 @@ function Info({ label, value }: { label: string; value: string }) {
         {label}
       </div>
       <div style={{ fontSize: 13 }}>{value}</div>
+    </div>
+  );
+}
+
+function ProgressBar({ elapsed, estimate, label }: { elapsed: number; estimate: number; label: string }) {
+  const pct = Math.min(95, (elapsed / estimate) * 100);
+  return (
+    <div style={{ marginBottom: 14, padding: 12, background: 'var(--mint)', borderRadius: 'var(--radius-sm)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--deep-teal)' }}>{label}</span>
+        <span style={{ fontSize: 11, color: 'var(--muted-foreground)', fontVariantNumeric: 'tabular-nums' }}>
+          {elapsed} sek
+        </span>
+      </div>
+      <div
+        style={{
+          height: 6,
+          background: 'rgba(29,135,117,0.15)',
+          borderRadius: 999,
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            width: `${pct}%`,
+            height: '100%',
+            background: 'linear-gradient(90deg, var(--primary), var(--deep-teal))',
+            transition: 'width 0.5s ease',
+          }}
+        />
+      </div>
+      <div style={{ fontSize: 10, color: 'var(--muted-foreground)', marginTop: 6 }}>
+        Du kan navigera bort — det fortsätter i bakgrunden. Resultatet hämtas automatiskt.
+      </div>
+    </div>
+  );
+}
+
+function FactsView({ facts, extractedAt }: { facts: CompanyFacts; extractedAt: string | null }) {
+  if (facts.parse_error) {
+    return (
+      <div>
+        <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginBottom: 8 }}>
+          AI-svaret kunde inte parsas som JSON. Råtext:
+        </div>
+        <div style={{ whiteSpace: 'pre-wrap', fontSize: 12, fontFamily: 'ui-monospace, monospace' }}>
+          {facts.raw_text ?? JSON.stringify(facts, null, 2)}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div>
+      {extractedAt && (
+        <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginBottom: 12 }}>
+          Extraherad {new Date(extractedAt).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' })}
+        </div>
+      )}
+      {facts.bolagsbeskrivning && <FactRow label="Bolagsbeskrivning" value={facts.bolagsbeskrivning} />}
+      {facts.usp && <FactRow label="USP" value={facts.usp} highlight />}
+      {facts.problem && <FactRow label="Problem" value={facts.problem} />}
+      {facts.lösning && <FactRow label="Lösning" value={facts.lösning} />}
+      {facts.marknad && (
+        <div style={{ marginBottom: 12 }}>
+          <div className="persona-section-label">Marknad</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+            {facts.marknad.storlek && <MiniBox label="Storlek" value={facts.marknad.storlek} />}
+            {facts.marknad.tillväxt && <MiniBox label="Tillväxt" value={facts.marknad.tillväxt} />}
+            {facts.marknad.kunder && <MiniBox label="Kunder" value={facts.marknad.kunder} />}
+          </div>
+        </div>
+      )}
+      {facts.traction && facts.traction.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <div className="persona-section-label">Traction</div>
+          <ul style={{ paddingLeft: 18, fontSize: 13, lineHeight: 1.6 }}>
+            {facts.traction.map((t, i) => (
+              <li key={i}>{t}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {facts.team && facts.team.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <div className="persona-section-label">Team</div>
+          {facts.team.map((m, i) => (
+            <div key={i} style={{ fontSize: 13, marginBottom: 4 }}>
+              <strong>{m.namn ?? '—'}</strong>
+              {m.roll && <span style={{ color: 'var(--muted-foreground)' }}> · {m.roll}</span>}
+              {m.bakgrund && <span style={{ color: 'var(--muted-foreground)' }}> — {m.bakgrund}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {facts.financials && (
+        <div style={{ marginBottom: 12 }}>
+          <div className="persona-section-label">Financials</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8 }}>
+            {facts.financials.intäkter_idag && <MiniBox label="Intäkter idag" value={facts.financials.intäkter_idag} />}
+            {facts.financials.prognos && <MiniBox label="Prognos" value={facts.financials.prognos} />}
+            {facts.financials.användning_av_kapital && (
+              <MiniBox label="Användning av kapital" value={facts.financials.användning_av_kapital} />
+            )}
+          </div>
+        </div>
+      )}
+      {facts.exit_strategi && <FactRow label="Exit-strategi" value={facts.exit_strategi} />}
+      {facts.risker && facts.risker.length > 0 && (
+        <div
+          style={{
+            padding: 10,
+            background: 'var(--yellow-bg)',
+            borderRadius: 'var(--radius-sm)',
+            marginTop: 8,
+          }}
+        >
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#8a6411', textTransform: 'uppercase', marginBottom: 6 }}>
+            Risker
+          </div>
+          <ul style={{ paddingLeft: 18, fontSize: 12, lineHeight: 1.6 }}>
+            {facts.risker.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FactRow({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div className="persona-section-label">{label}</div>
+      <div
+        style={{
+          fontSize: 13,
+          lineHeight: 1.6,
+          color: highlight ? 'var(--deep-teal)' : 'var(--foreground)',
+          fontWeight: highlight ? 600 : 400,
+          fontStyle: highlight ? 'italic' : 'normal',
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function MiniBox({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{
+        padding: 10,
+        background: 'var(--soft-cloud)',
+        borderRadius: 'var(--radius-sm)',
+        border: '1px solid var(--border)',
+      }}
+    >
+      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted-foreground)', textTransform: 'uppercase', marginBottom: 4 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 12, lineHeight: 1.4 }}>{value}</div>
     </div>
   );
 }

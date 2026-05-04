@@ -1,13 +1,13 @@
 // /api/case-plan — Genererar AI-marknadsplan för ett case.
-// Läser case-info + dokument-metadata, anropar Marketing Strategist + Campaign Planner,
-// returnerar strukturerad plan (faser, content-items, kanaler, KPI:er).
-// Sparar planen i cases.marketing_plan (jsonb).
+// Använder cases.extracted_facts om de finns (mer specifik plan); annars
+// bara case-fält + dokument-metadata.
 
 import { createClient } from '@supabase/supabase-js';
 
 export const maxDuration = 60;
 
 const ANTHROPIC_MODEL = 'claude-sonnet-4-6';
+const ANTHROPIC_TIMEOUT_MS = 50000; // 50s — lämnar 10s marginal till Vercel-killen
 
 interface RequestBody {
   case_id: string;
@@ -21,7 +21,7 @@ export default async function handler(req: Request): Promise<Response> {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!anthropicKey || !supabaseUrl || !serviceKey) {
-    return json({ error: 'config saknas', need: ['ANTHROPIC_API_KEY', 'SUPABASE_*'] }, 503);
+    return json({ error: 'config saknas' }, 503);
   }
 
   let body: RequestBody;
@@ -34,13 +34,12 @@ export default async function handler(req: Request): Promise<Response> {
 
   const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
-  // Hämta case + dokument-metadata
   const { data: caseRow, error: caseErr } = await supabase
     .from('cases')
     .select('*')
     .eq('id', body.case_id)
     .single();
-  if (caseErr || !caseRow) return json({ error: 'case not found', detail: caseErr?.message }, 404);
+  if (caseErr || !caseRow) return json({ error: 'case not found' }, 404);
 
   const { data: docs } = await supabase
     .from('case_documents')
@@ -50,9 +49,13 @@ export default async function handler(req: Request): Promise<Response> {
   const systemPrompt = buildSystemPrompt();
   const userPrompt = buildUserPrompt(caseRow as Record<string, unknown>, docs ?? []);
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ANTHROPIC_TIMEOUT_MS);
+
   try {
     const aiRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
+      signal: controller.signal,
       headers: {
         'content-type': 'application/json',
         'x-api-key': anthropicKey,
@@ -60,15 +63,16 @@ export default async function handler(req: Request): Promise<Response> {
       },
       body: JSON.stringify({
         model: ANTHROPIC_MODEL,
-        max_tokens: 2400,
+        max_tokens: 1800,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
       }),
     });
+    clearTimeout(timer);
 
     if (!aiRes.ok) {
       const detail = await aiRes.text();
-      return json({ error: 'anthropic failed', status: aiRes.status, detail: detail.slice(0, 500) }, 502);
+      return json({ error: 'anthropic failed', status: aiRes.status, detail: detail.slice(0, 400) }, 502);
     }
 
     const aiData = (await aiRes.json()) as { content?: Array<{ type: string; text?: string }> };
@@ -76,85 +80,71 @@ export default async function handler(req: Request): Promise<Response> {
       .filter((c) => c.type === 'text')
       .map((c) => c.text ?? '')
       .join('');
-
     const plan = parsePlan(text);
 
-    // Spara i cases.marketing_plan
     await supabase
       .from('cases')
       .update({ marketing_plan: plan, plan_generated_at: new Date().toISOString() })
       .eq('id', body.case_id);
 
-    return json({ ok: true, plan, raw: text });
+    return json({ ok: true, plan });
   } catch (e) {
+    clearTimeout(timer);
+    const err = e as Error;
+    if (err.name === 'AbortError') return json({ error: `Anthropic-anropet timade ut (${ANTHROPIC_TIMEOUT_MS / 1000}s). Prova igen.` }, 504);
     return json({ error: 'plan generation failed', detail: String(e) }, 500);
   }
 }
 
 function buildSystemPrompt(): string {
-  return `Du är GMF:s Marketing Strategist + Campaign Planner i en. Du genererar marknadsplaner för specifika investmentcases på GreenMerc Finance-plattformen.
+  return `Du är GMF:s Marketing Strategist + Campaign Planner. Du genererar marknadsplaner för investmentcases på GreenMerc Finance.
 
-GMF-kontext:
-- Reglerad svensk crowdfundingsplattform under ECSPR
-- 3 målgrupper: Karin (38, controller, primär), Per (46, AB-investerare), Oscar (28, tech early adopter)
-- Konkurrenter: Crowdcube, Mamacrowd, Tioex, Tessin
-- Brand: trygg, transparent, professionell — ALDRIG hype-språk
+GMF-kontext: Reglerad svensk crowdfundingsplattform (ECSPR). 3 personas: Karin (38, controller, primär), Per (46, AB-investerare), Oscar (28, tech). Brand: trygg, transparent, professionell — aldrig hype.
 
-Du ska producera en strukturerad marknadsplan i ett specifikt JSON-format. Returnera ENDAST giltig JSON i ett \`\`\`json kodblock — ingen text utanför kodblocket.
+Returnera ENDAST JSON i ett \`\`\`json kodblock. Inga ord utanför.
 
-Format:
+Format (3-4 faser, 2-4 items per fas):
 \`\`\`json
 {
-  "summary": "2-3 meningar om strategin för caset",
+  "summary": "2 meningar",
   "primary_persona": "karin|per|oscar",
-  "key_message": "huvudbudskapet i 1 mening",
+  "key_message": "1 mening",
   "channels_priority": ["LinkedIn", "MailerLite", "..."],
   "phases": [
     {
       "name": "Pre-launch (T-30 till T-15)",
       "starts_days_before_close": 30,
       "ends_days_before_close": 15,
-      "objective": "Bygga awareness, kvalificera leads",
+      "objective": "1 mening",
       "content_items": [
-        {
-          "title": "Konkret titel",
-          "type": "blogg|linkedin|email|annons|web",
-          "channel": "LinkedIn",
-          "description": "Vad det handlar om i 1-2 meningar",
-          "kpi": "T.ex. 200 LinkedIn-impressions, 15 leads"
-        }
+        { "title": "Konkret titel", "type": "blogg|linkedin|email|annons", "channel": "LinkedIn", "description": "1 mening", "kpi": "T.ex. 200 imp, 15 leads" }
       ]
     }
   ],
   "risks": ["Risk 1", "Risk 2"],
-  "success_metrics": ["KPI 1: target", "KPI 2: target"]
+  "success_metrics": ["KPI: target"]
 }
-\`\`\`
-
-Generera 3-5 faser. Varje fas har 2-5 content-items. Var konkret med datum (räknat från emission_close).`;
+\`\`\``;
 }
 
 function buildUserPrompt(caseRow: Record<string, unknown>, docs: Array<Record<string, unknown>>): string {
-  return `Generera en marknadsplan för följande case:
+  const facts = caseRow.extracted_facts as Record<string, unknown> | null;
+  return `Generera en marknadsplan för:
 
-\`\`\`json
-${JSON.stringify(caseRow, null, 2)}
-\`\`\`
+**Case:** ${caseRow.name} (${caseRow.sector})
+**Sökt belopp:** ${caseRow.target_amount_sek ? `${(Number(caseRow.target_amount_sek) / 1_000_000).toFixed(1)} MSEK` : 'okänt'}
+**Stänger:** ${caseRow.emission_close ?? 'ej satt'}
+**Beskrivning:** ${caseRow.description ?? '(ingen)'}
 
-Tillgängliga dokument:
-${docs.length === 0 ? '(inga dokument uppladdade än)' : docs.map((d) => `- ${d.file_name}${d.description ? ` — ${d.description}` : ''}`).join('\n')}
-
-Generera planen som JSON enligt formatet i system-prompten.`;
+${facts ? `**Bolagsfakta (extraherade från pitch deck):**\n\`\`\`json\n${JSON.stringify(facts, null, 2)}\n\`\`\`\n\nBasera planen på dessa fakta.` : `**Dokument:** ${docs.length === 0 ? '(inga uppladdade)' : docs.map((d) => d.file_name).join(', ')}`}`;
 }
 
 function parsePlan(text: string): Record<string, unknown> {
-  // Försök plocka ut JSON från ```json kodblock
   const match = text.match(/```json\s*([\s\S]+?)```/);
   const raw = match ? match[1].trim() : text.trim();
   try {
     return JSON.parse(raw);
   } catch {
-    // Fallback: spara som rå text om JSON-parsning misslyckas
     return { raw_text: text, parse_error: true };
   }
 }
