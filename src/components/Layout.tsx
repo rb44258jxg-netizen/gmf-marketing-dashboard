@@ -6,6 +6,10 @@ const TABS = [
   { to: '/', label: 'Översikt' },
   { to: '/personas', label: 'Personas' },
   { to: '/content', label: 'Innehåll' },
+  { to: '/competitors', label: 'Konkurrenter' },
+  { to: '/email', label: 'E-post' },
+  { to: '/social', label: 'Sociala medier' },
+  { to: '/channels', label: 'Kanaler' },
   { to: '/audit', label: 'Audit' },
 ];
 
