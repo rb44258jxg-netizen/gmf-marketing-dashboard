@@ -94,4 +94,6 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-export const config = { runtime: 'edge' };
+// Node.js runtime (default) — Edge cold-start hade ojämn latency med långa
+// system prompts. maxDuration ökas till 60s för Hobby-tier.
+export const maxDuration = 60;

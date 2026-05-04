@@ -35,12 +35,23 @@ export async function callChat(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ system: systemPrompt, messages }),
     });
-    const body = (await res.json()) as ChatApiResponse;
+
+    // Läs som text först — vissa felsvar (Vercel timeout, runtime crash)
+    // är HTML/text och kraschar res.json() med oförståelig SyntaxError.
+    const raw = await res.text();
+    let body: ChatApiResponse = {};
+    try {
+      body = JSON.parse(raw) as ChatApiResponse;
+    } catch {
+      return {
+        error: `Servern svarade med icke-JSON (HTTP ${res.status}). Troligen timeout — vänta 5 sek och prova igen. (${raw.slice(0, 120)})`,
+      };
+    }
+
     if (!res.ok) {
       return {
         error:
-          body.error ??
-          `HTTP ${res.status}` + (body.hint ? ` — ${body.hint}` : ''),
+          (body.error ?? `HTTP ${res.status}`) + (body.hint ? ` — ${body.hint}` : ''),
       };
     }
     return { text: body.text ?? '' };
