@@ -1,11 +1,15 @@
-// /api/case-extract — AI läser uppladdade case-dokument (PDF) och extraherar
-// strukturerade bolagsfakta som sparas i cases.extracted_facts.
+// /api/case-extract — Extraherar bolagsfakta från uppladdat pitch deck.
+// Strategi: parsa PDF till text på servern (pdf-parse), skicka texten till
+// Anthropic. Detta undviker Anthropic's PDF-page-limit och är mycket snabbare.
 
 import { createClient } from '@supabase/supabase-js';
+// @ts-expect-error pdf-parse saknar typer i sitt npm-paket
+import pdfParse from 'pdf-parse';
 
 export const maxDuration = 60;
 
 const ANTHROPIC_MODEL = 'claude-sonnet-4-6';
+const MAX_TEXT_CHARS = 60000; // ~15k tokens — säker marginal under context-fönstret
 
 interface RequestBody {
   case_id: string;
@@ -39,7 +43,6 @@ export default async function handler(req: Request): Promise<Response> {
 
   if (!caseRow) return json({ error: 'case not found' }, 404);
 
-  // Hämta första PDF-dokumentet som base64. Anthropic stöder PDF direkt i messages.
   const pdfDocs = (docs ?? []).filter((d: { file_type: string }) =>
     (d.file_type ?? '').includes('pdf'),
   );
@@ -47,14 +50,42 @@ export default async function handler(req: Request): Promise<Response> {
     return json({ error: 'inga PDF-dokument uppladdade än för detta case' }, 400);
   }
 
-  const primary = pdfDocs[0] as { file_path: string; file_name: string };
-  const { data: fileData, error: dlErr } = await supabase.storage
-    .from('case-documents')
-    .download(primary.file_path);
-  if (dlErr || !fileData) return json({ error: 'kunde inte ladda dokumentet', detail: dlErr?.message }, 502);
+  // Plocka text ur ALLA PDF-dokument (sammanlagd kunskapskälla)
+  const docTexts: Array<{ name: string; text: string; pages: number }> = [];
+  for (const doc of pdfDocs as Array<{ file_path: string; file_name: string }>) {
+    const { data: fileData, error: dlErr } = await supabase.storage
+      .from('case-documents')
+      .download(doc.file_path);
+    if (dlErr || !fileData) continue;
+    try {
+      const buffer = Buffer.from(await fileData.arrayBuffer());
+      const parsed = await pdfParse(buffer);
+      docTexts.push({
+        name: doc.file_name,
+        text: parsed.text || '',
+        pages: parsed.numpages || 0,
+      });
+    } catch (e) {
+      // Hoppa över PDF som inte kan parsas, fortsätt med övriga
+      // eslint-disable-next-line no-console
+      console.error('pdf-parse failed for', doc.file_name, e);
+    }
+  }
 
-  const arrayBuffer = await fileData.arrayBuffer();
-  const base64 = arrayBufferToBase64(arrayBuffer);
+  if (docTexts.length === 0) {
+    return json({ error: 'kunde inte läsa något PDF-dokument (skadad/krypterad fil?)' }, 422);
+  }
+
+  // Bygg sammanfogad text — trunkera vid MAX_TEXT_CHARS för säkerhets skull
+  let combined = docTexts
+    .map((d) => `=== ${d.name} (${d.pages} sidor) ===\n${d.text}`)
+    .join('\n\n---\n\n');
+
+  let truncated = false;
+  if (combined.length > MAX_TEXT_CHARS) {
+    combined = combined.slice(0, MAX_TEXT_CHARS) + '\n\n[...trunkerat — texten var längre]';
+    truncated = true;
+  }
 
   const systemPrompt = `Du extraherar bolagsfakta från ett pitch deck för marknadsförings-syfte.
 
@@ -75,8 +106,7 @@ Format:
     "kunder": "Vilka är kunderna?"
   },
   "traction": [
-    "Konkret resultat eller milstolpe (siffror!)",
-    "Annat"
+    "Konkret resultat eller milstolpe (siffror!)"
   ],
   "financials": {
     "intäkter_idag": "T.ex. 2 MSEK ARR",
@@ -92,13 +122,12 @@ Format:
 Om någon information saknas i decket — sätt fältet till null. Hitta inte på.
 Skriv på svenska. Var konkret med siffror. Lyft fram det som är säljande för en investerare.`;
 
-  const userPrompt = `Extrahera bolagsfakta från detta pitch deck.
+  const userPrompt = `Extrahera bolagsfakta från följande pitch deck för "${caseRow.name}" (${caseRow.sector}).
 
-Bolag: ${caseRow.name}
-Sektor: ${caseRow.sector}
-${caseRow.description ? `Existerande beskrivning: ${caseRow.description}` : ''}`;
+${caseRow.description ? `Existerande beskrivning: ${caseRow.description}\n\n` : ''}**Pitch deck text:**
 
-  // Anthropic-anrop med 50s timeout (inom Vercel 60s)
+${combined}`;
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 50000);
 
@@ -115,25 +144,14 @@ ${caseRow.description ? `Existerande beskrivning: ${caseRow.description}` : ''}`
         model: ANTHROPIC_MODEL,
         max_tokens: 2000,
         system: systemPrompt,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'document',
-                source: { type: 'base64', media_type: 'application/pdf', data: base64 },
-              },
-              { type: 'text', text: userPrompt },
-            ],
-          },
-        ],
+        messages: [{ role: 'user', content: userPrompt }],
       }),
     });
     clearTimeout(timer);
 
     if (!aiRes.ok) {
       const detail = await aiRes.text();
-      return json({ error: 'anthropic failed', status: aiRes.status, detail: detail.slice(0, 400) }, 502);
+      return json({ error: 'anthropic failed', status: aiRes.status, detail: detail.slice(0, 500) }, 502);
     }
 
     const aiData = (await aiRes.json()) as { content?: Array<{ type: string; text?: string }> };
@@ -143,26 +161,22 @@ ${caseRow.description ? `Existerande beskrivning: ${caseRow.description}` : ''}`
       .join('');
     const facts = parseJson(text);
 
+    if (truncated) {
+      (facts as Record<string, unknown>)._note = 'Texten var lång och trunkerades — stämmer fakta inte, prova igen efter att du laddat upp ett kortare deck.';
+    }
+
     await supabase
       .from('cases')
       .update({ extracted_facts: facts, facts_extracted_at: new Date().toISOString() })
       .eq('id', body.case_id);
 
-    return json({ ok: true, facts });
+    return json({ ok: true, facts, meta: { docs: docTexts.length, total_chars: combined.length, truncated } });
   } catch (e) {
     clearTimeout(timer);
     const err = e as Error;
     if (err.name === 'AbortError') return json({ error: 'Anthropic-anropet timade ut (50s)' }, 504);
     return json({ error: 'extract failed', detail: String(e) }, 500);
   }
-}
-
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  // Node.js har Buffer; Edge har btoa. Vi använder Node.js runtime så Buffer finns.
-  return Buffer.from(binary, 'binary').toString('base64');
 }
 
 function parseJson(text: string): Record<string, unknown> {
