@@ -7,6 +7,7 @@ import {
   type MLAutomation,
   type MLCampaign,
 } from '../lib/mailerlite';
+import AskBot from '../components/AskBot';
 
 interface State {
   loading: boolean;
@@ -81,6 +82,10 @@ export default function Email() {
         <div className="card-hero-title">E-postkampanjer</div>
         <div className="card-hero-sub">
           Live-data från MailerLite. Klicka "Öppna MailerLite" för att redigera kampanjer.
+        </div>
+        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <AskBot botSlug="email-specialist" label="Skriv ett mail" />
+          <AskBot botSlug="analytics-reporter" label="Analysera resultaten" />
         </div>
       </div>
 

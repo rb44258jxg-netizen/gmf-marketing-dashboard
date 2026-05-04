@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { logAudit } from '../lib/audit';
+import AskBot from '../components/AskBot';
 
 interface Competitor {
   id: string;
@@ -115,6 +116,9 @@ export default function Competitors() {
       <div className="card card-hero">
         <div className="card-hero-title">Steal With Pride</div>
         <div className="card-hero-sub">Det bästa från varje konkurrent — vad vi kopierar och gör bättre.</div>
+        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <AskBot botSlug="marketing-strategist" label="Fråga om konkurrenter" />
+        </div>
       </div>
 
       {error && <div className="auth-error">{error}</div>}

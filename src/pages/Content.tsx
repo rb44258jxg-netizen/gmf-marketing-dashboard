@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { logAudit } from '../lib/audit';
+import AskBot from '../components/AskBot';
 import type {
   ContentItemInsert,
   ContentItemRow,
@@ -231,6 +232,11 @@ export default function Content() {
         <div className="card-hero-title">Content Library</div>
         <div className="card-hero-sub">
           Allt producerat marknadsmaterial. Granska, redigera och godkänn innan publicering.
+        </div>
+        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <AskBot botSlug="content-writer" label="Skriv nytt innehåll" />
+          <AskBot botSlug="brand-guardian" label="Granska text" />
+          <AskBot botSlug="seo-strategist" label="SEO-brief" />
         </div>
       </div>
 

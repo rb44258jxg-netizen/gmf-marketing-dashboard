@@ -10,6 +10,7 @@ const TABS = [
   { to: '/email', label: 'E-post' },
   { to: '/social', label: 'Sociala medier' },
   { to: '/channels', label: 'Kanaler' },
+  { to: '/chat', label: '🤖 Bottar' },
   { to: '/audit', label: 'Audit' },
 ];
 

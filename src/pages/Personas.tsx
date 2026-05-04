@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { logAudit } from '../lib/audit';
 import type { PersonaRow, PersonaUpdate } from '../lib/database.types';
+import AskBot from '../components/AskBot';
 
 interface EditState {
   name: string;
@@ -118,6 +119,9 @@ export default function Personas() {
         <div className="card-hero-title">Målgruppsprofiler</div>
         <div className="card-hero-sub">
           Redigera personas direkt — ändringar sparas i Supabase och loggas i audit.
+        </div>
+        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <AskBot botSlug="marketing-strategist" label="Fråga om personas" />
         </div>
       </div>
 
