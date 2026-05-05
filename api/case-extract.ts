@@ -3,8 +3,10 @@
 // Anthropic. Detta undviker Anthropic's PDF-page-limit och är mycket snabbare.
 
 import { createClient } from '@supabase/supabase-js';
+// pdf-parse@1.x:s index.js läser en testfil vid import — kraschar i serverless.
+// Importera direkt från lib/ för att hoppa över test-bootstrappen.
 // @ts-expect-error pdf-parse saknar typer i sitt npm-paket
-import pdfParse from 'pdf-parse';
+import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 
 export const maxDuration = 60;
 
