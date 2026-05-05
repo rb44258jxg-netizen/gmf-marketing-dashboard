@@ -14,6 +14,25 @@ GreenMerc Finance marketing team's internal workspace — personas, content libr
 
 Phase 2 will add MailerLite + social channels. Phase 3 adds calendar + competitor refresh.
 
+## Status: humans-only mode (2026-05-05)
+
+AI-anrop till `/api/chat`, `/api/case-extract`, `/api/case-plan`, `/api/briefing` och
+`/api/ingest-run` är **avstängda via feature-flag** (`src/lib/featureFlags.ts` →
+`AI_ACTIONS_ENABLED = false`). Bakgrund: Vercel Functions hänger 5min på Hobby-tier
+i arn1-regionen, oavsett kod. Pre-Sprint-5-baseline visade samma symtom — det är
+infrastruktur, inte vår kod.
+
+Tills infra är fixad körs dashboarden i "humans-only mode":
+
+- AskBot-knappar är dolda
+- "Analysera dokument" + "Generera plan" på Cases är ersatta av paste-formulär
+- Veckobriefing produceras manuellt och paste:as in via `/runs` och Briefing-sidan
+- Schemalagda marketing-tasks (`/runs`) tar input via "+ Lägg till körning" istället
+  för cron POST mot `/api/ingest-run`
+
+API-routes i `api/` är **experimentella** — koden ligger kvar för framtida bruk men
+kallas inte. Slå tillbaka på via `AI_ACTIONS_ENABLED = true` när Vercel-flappen är löst.
+
 ---
 
 ## Local setup
