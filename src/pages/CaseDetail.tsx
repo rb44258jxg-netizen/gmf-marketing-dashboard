@@ -19,6 +19,7 @@ import {
 import { logAudit } from '../lib/audit';
 import { supabase } from '../lib/supabase';
 import AskBot from '../components/AskBot';
+import { AI_ACTIONS_ENABLED } from '../lib/featureFlags';
 
 export default function CaseDetail({ caseId }: { caseId: string }) {
   const [c, setC] = useState<Case | null | undefined>(undefined);
@@ -516,45 +517,52 @@ export default function CaseDetail({ caseId }: { caseId: string }) {
           <div className="card">
             <div className="card-title">
               Bolagsfakta
-              <button
-                className="btn-primary"
-                onClick={handleExtractFacts}
-                disabled={extracting || docs.filter((d) => (d.file_type ?? '').includes('pdf')).length === 0}
-                title="AI läser uppladdat pitch deck och extraherar bolagsfakta"
-              >
-                {extracting
-                  ? 'Analyserar…'
-                  : c.extracted_facts
-                  ? '🔄 Analysera om'
-                  : '📄 Analysera dokument'}
-              </button>
+              {AI_ACTIONS_ENABLED && (
+                <button
+                  className="btn-primary"
+                  onClick={handleExtractFacts}
+                  disabled={extracting || docs.filter((d) => (d.file_type ?? '').includes('pdf')).length === 0}
+                  title="AI läser uppladdat pitch deck och extraherar bolagsfakta"
+                >
+                  {extracting
+                    ? 'Analyserar…'
+                    : c.extracted_facts
+                    ? '🔄 Analysera om'
+                    : '📄 Analysera dokument'}
+                </button>
+              )}
             </div>
-            {extracting && (
+            {extracting && AI_ACTIONS_ENABLED && (
               <ProgressBar elapsed={extractElapsed} estimate={45} label="AI läser ditt pitch deck…" />
             )}
             {!c.extracted_facts && !extracting ? (
               <div className="empty-state">
-                <strong>Inga bolagsfakta extraherade än</strong>
-                Ladda upp ett pitch deck (PDF) och klicka "Analysera dokument" — AI läser och fyller i bolagsbeskrivning, team, marknad, traction, financials med mera.
+                <strong>Inga bolagsfakta än</strong>
+                {AI_ACTIONS_ENABLED
+                  ? 'Ladda upp ett pitch deck (PDF) och klicka "Analysera dokument" — AI läser och fyller i bolagsbeskrivning, team, marknad, traction, financials med mera.'
+                  : 'Använd Bolagsfakta-formuläret nedan för att klistra in fakta du redan extraherat (t.ex. via en samtalsbot i Claude Code).'}
               </div>
             ) : c.extracted_facts ? (
               <FactsView facts={c.extracted_facts} extractedAt={c.facts_extracted_at} />
             ) : null}
+            {/* TODO Step 2: <FactsPasteForm /> för manuell inmatning av bolagsfakta */}
           </div>
 
           <div className="card">
             <div className="card-title">
               Marknadsplan
-              <button
-                className="btn-primary"
-                onClick={handleGeneratePlan}
-                disabled={generating}
-                title="AI genererar/uppdaterar marknadsplanen"
-              >
-                {generating ? 'Genererar…' : c.marketing_plan ? '🔄 Generera om' : '✨ Generera plan'}
-              </button>
+              {AI_ACTIONS_ENABLED && (
+                <button
+                  className="btn-primary"
+                  onClick={handleGeneratePlan}
+                  disabled={generating}
+                  title="AI genererar/uppdaterar marknadsplanen"
+                >
+                  {generating ? 'Genererar…' : c.marketing_plan ? '🔄 Generera om' : '✨ Generera plan'}
+                </button>
+              )}
             </div>
-            {generating && (
+            {generating && AI_ACTIONS_ENABLED && (
               <ProgressBar
                 elapsed={genElapsed}
                 estimate={45}
@@ -567,12 +575,15 @@ export default function CaseDetail({ caseId }: { caseId: string }) {
             )}
             {!c.marketing_plan && !generating ? (
               <div className="empty-state">
-                <strong>Ingen plan genererad än</strong>
-                Klicka "Generera plan" — Marketing Strategist producerar en strukturerad tidsplan baserat på case-info{c.extracted_facts ? ' och extraherade bolagsfakta' : ' och dokument'}.
+                <strong>Ingen plan än</strong>
+                {AI_ACTIONS_ENABLED
+                  ? `Klicka "Generera plan" — Marketing Strategist producerar en strukturerad tidsplan baserat på case-info${c.extracted_facts ? ' och extraherade bolagsfakta' : ' och dokument'}.`
+                  : 'Använd Marknadsplan-formuläret nedan för att klistra in en plan du redan skrivit (t.ex. via Marketing Strategist-boten i Claude Code).'}
               </div>
             ) : c.marketing_plan ? (
               <PlanView plan={c.marketing_plan} planGeneratedAt={c.plan_generated_at} />
             ) : null}
+            {/* TODO Step 2: <PlanPasteForm /> för manuell inmatning av marknadsplan */}
           </div>
         </div>
 

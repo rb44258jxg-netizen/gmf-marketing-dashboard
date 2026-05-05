@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import AskBot from '../components/AskBot';
 
 interface BriefingRow {
   id: string;
@@ -48,15 +47,8 @@ export default function Briefing() {
       <div className="card card-hero">
         <div className="card-hero-title">Veckobriefing</div>
         <div className="card-hero-sub">
-          Marketing Strategist sammanställer läget varje måndag 06:00 — pipeline, e-post, prioriteringar.
-        </div>
-        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <AskBot
-            botSlug="marketing-strategist"
-            label="Be om special-briefing"
-            variant="on-dark"
-            prefill="Ge mig en briefing nu för senaste 7 dagarna — vad har hänt och vad ska prioriteras närmsta veckan?"
-          />
+          Sammanställ veckans läge — pipeline, e-post, prioriteringar — och spara här så hela teamet kan läsa.
+          {/* TODO Step 2: knapp "Lägg till veckobriefing" som öppnar paste-form */}
         </div>
       </div>
 
@@ -64,9 +56,9 @@ export default function Briefing() {
 
       {!latest ? (
         <div className="card empty-state">
-          <strong>Ingen briefing genererad än</strong>
-          Första briefingen körs nästa måndag 06:00. Du kan trigga manuellt via Anthropic-knappen ovan, eller köra
-          <code> /api/briefing</code> via Vercel cron-test.
+          <strong>Ingen briefing än</strong>
+          Skriv veckobriefingen i Claude Code (eller var du nu föredrar) och paste:a in den här
+          via "Lägg till veckobriefing"-formuläret (kommer i nästa steg).
         </div>
       ) : (
         <div className="card">
