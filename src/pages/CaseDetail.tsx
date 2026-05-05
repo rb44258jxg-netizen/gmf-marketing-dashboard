@@ -545,7 +545,13 @@ export default function CaseDetail({ caseId }: { caseId: string }) {
             ) : c.extracted_facts ? (
               <FactsView facts={c.extracted_facts} extractedAt={c.facts_extracted_at} />
             ) : null}
-            {/* TODO Step 2: <FactsPasteForm /> för manuell inmatning av bolagsfakta */}
+            {!AI_ACTIONS_ENABLED && (
+              <FactsPasteForm
+                caseId={caseId}
+                current={c.extracted_facts}
+                onSaved={(facts) => setC({ ...c, extracted_facts: facts, facts_extracted_at: new Date().toISOString() })}
+              />
+            )}
           </div>
 
           <div className="card">
@@ -583,7 +589,13 @@ export default function CaseDetail({ caseId }: { caseId: string }) {
             ) : c.marketing_plan ? (
               <PlanView plan={c.marketing_plan} planGeneratedAt={c.plan_generated_at} />
             ) : null}
-            {/* TODO Step 2: <PlanPasteForm /> för manuell inmatning av marknadsplan */}
+            {!AI_ACTIONS_ENABLED && (
+              <PlanPasteForm
+                caseId={caseId}
+                current={c.marketing_plan}
+                onSaved={(plan) => setC({ ...c, marketing_plan: plan, plan_generated_at: new Date().toISOString() })}
+              />
+            )}
           </div>
         </div>
 
@@ -912,5 +924,137 @@ function PlanView({ plan, planGeneratedAt }: { plan: MarketingPlan; planGenerate
         </div>
       )}
     </div>
+  );
+}
+
+// ============================================================================
+// Paste-formulär (humans-only mode) — manual replacement för AI-routes som
+// hänger på Vercel Hobby. Sparar text som { raw_text, parse_error: true } så
+// FactsView/PlanView fall-back:ar till råtextrendering.
+// ============================================================================
+
+function PasteForm({
+  current,
+  placeholder,
+  saveLabel,
+  onSave,
+}: {
+  current: string | null;
+  placeholder: string;
+  saveLabel: string;
+  onSave: (text: string) => Promise<void>;
+}) {
+  const [text, setText] = useState(current ?? '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    if (!text.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(text.trim());
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <details style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+      <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--muted-foreground)' }}>
+        {current ? '✏️ Uppdatera (klistra in ny text)' : '📝 Klistra in text manuellt'}
+      </summary>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={placeholder}
+        style={{
+          width: '100%',
+          minHeight: 200,
+          marginTop: 10,
+          fontFamily: 'inherit',
+          fontSize: 13,
+          padding: 10,
+          borderRadius: 6,
+          border: '1px solid var(--border)',
+          background: 'var(--bg)',
+          color: 'inherit',
+          boxSizing: 'border-box',
+          resize: 'vertical',
+        }}
+      />
+      <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+        <button className="btn-primary" onClick={handleSave} disabled={saving || !text.trim()}>
+          {saving ? 'Sparar…' : saveLabel}
+        </button>
+        {error && <span style={{ fontSize: 12, color: 'var(--error, #c33)' }}>{error}</span>}
+      </div>
+    </details>
+  );
+}
+
+function FactsPasteForm({
+  caseId,
+  current,
+  onSaved,
+}: {
+  caseId: string;
+  current: CompanyFacts | null;
+  onSaved: (facts: CompanyFacts) => void;
+}) {
+  return (
+    <PasteForm
+      current={current?.raw_text ?? null}
+      placeholder="Klistra in bolagsfakta från Claude Code (markdown eller fri text)…"
+      saveLabel="Spara bolagsfakta"
+      onSave={async (text) => {
+        const facts: CompanyFacts = { raw_text: text, parse_error: true };
+        await updateCase(caseId, {
+          extracted_facts: facts,
+          facts_extracted_at: new Date().toISOString(),
+        });
+        await logAudit({
+          action: 'case.facts_paste',
+          entity_type: 'case',
+          entity_id: caseId,
+          after: { length: text.length },
+        });
+        onSaved(facts);
+      }}
+    />
+  );
+}
+
+function PlanPasteForm({
+  caseId,
+  current,
+  onSaved,
+}: {
+  caseId: string;
+  current: MarketingPlan | null;
+  onSaved: (plan: MarketingPlan) => void;
+}) {
+  return (
+    <PasteForm
+      current={current?.raw_text ?? null}
+      placeholder="Klistra in marknadsplan från Marketing Strategist (markdown eller fri text)…"
+      saveLabel="Spara marknadsplan"
+      onSave={async (text) => {
+        const plan: MarketingPlan = { raw_text: text, parse_error: true };
+        await updateCase(caseId, {
+          marketing_plan: plan,
+          plan_generated_at: new Date().toISOString(),
+        });
+        await logAudit({
+          action: 'case.plan_paste',
+          entity_type: 'case',
+          entity_id: caseId,
+          after: { length: text.length },
+        });
+        onSaved(plan);
+      }}
+    />
   );
 }
