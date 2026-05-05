@@ -33,7 +33,7 @@ export default async function handler(req: Request): Promise<Response> {
   if (!ingestSecret) {
     return json({ error: 'INGEST_SECRET ej satt på servern' }, 503);
   }
-  const auth = req.headers.get('authorization');
+  const auth = readHeader(req, 'authorization');
   if (auth !== `Bearer ${ingestSecret}`) {
     return json({ error: 'unauthorized' }, 401);
   }
@@ -100,4 +100,20 @@ function json(data: unknown, status = 200): Response {
     status,
     headers: { 'content-type': 'application/json' },
   });
+}
+
+// Vercel Node-runtime levererar `req.headers` som ett plain object, inte en
+// Headers-instans — så `.get()` saknas. Edge-runtime har Headers-instansen.
+// Den här hjälparen funkar i båda.
+function readHeader(req: Request, name: string): string | null {
+  const headers = req.headers as unknown as
+    | Headers
+    | Record<string, string | string[] | undefined>;
+  if (typeof (headers as Headers).get === 'function') {
+    return (headers as Headers).get(name);
+  }
+  const lower = name.toLowerCase();
+  const raw = (headers as Record<string, string | string[] | undefined>)[lower];
+  if (Array.isArray(raw)) return raw[0] ?? null;
+  return raw ?? null;
 }
