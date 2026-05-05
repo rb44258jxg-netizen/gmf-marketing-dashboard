@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { AI_ACTIONS_ENABLED } from './featureFlags';
 
 export type CaseStatus = 'prospect' | 'onboarding' | 'active' | 'closed' | 'paused';
 
@@ -198,6 +199,14 @@ async function callApi<T>(
   caseId: string,
   resultKey: 'plan' | 'facts',
 ): Promise<T | { error: string }> {
+  if (!AI_ACTIONS_ENABLED) {
+    return {
+      error:
+        'AI-anrop är pausade. Använd Claude Code för att producera ' +
+        (resultKey === 'plan' ? 'marknadsplanen' : 'bolagsfakta') +
+        ', och paste:a in resultatet via formuläret nedan.',
+    };
+  }
   try {
     const res = await fetch(endpoint, {
       method: 'POST',

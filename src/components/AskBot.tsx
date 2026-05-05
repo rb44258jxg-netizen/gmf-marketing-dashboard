@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { findBot } from '../lib/bots';
+import { AI_ACTIONS_ENABLED } from '../lib/featureFlags';
 
 interface Props {
   botSlug: string;
@@ -13,6 +14,8 @@ interface Props {
 }
 
 export default function AskBot({ botSlug, label, prefill, size = 'normal', variant = 'on-light' }: Props) {
+  // AI-actions globalt avstängda tills Vercel-infra är fixad. Se featureFlags.ts.
+  if (!AI_ACTIONS_ENABLED) return null;
   const bot = findBot(botSlug);
   if (!bot) return null;
   const params = new URLSearchParams({ bot: bot.slug });

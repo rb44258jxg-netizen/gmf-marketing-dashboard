@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { AI_ACTIONS_ENABLED } from './featureFlags';
 
 export interface ChatMessage {
   id: string;
@@ -29,6 +30,12 @@ export async function callChat(
   systemPrompt: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
 ): Promise<{ text: string } | { error: string }> {
+  if (!AI_ACTIONS_ENABLED) {
+    return {
+      error:
+        'AI-anrop är pausade tills Vercel-infra är fixad. Använd Claude Code/claude.ai för att prata med boten och paste:a in resultatet i dashboarden.',
+    };
+  }
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
