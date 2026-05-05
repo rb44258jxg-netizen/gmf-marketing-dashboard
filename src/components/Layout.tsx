@@ -13,6 +13,7 @@ const TABS = [
   { to: '/channels', label: 'Kanaler' },
   { to: '/analytics', label: 'Analytics' },
   { to: '/briefing', label: 'Briefing' },
+  { to: '/runs', label: 'Körningar' },
   { to: '/chat', label: '🤖 Bottar' },
   { to: '/audit', label: 'Audit' },
 ];

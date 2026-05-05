@@ -11,6 +11,7 @@ import Social from './pages/Social';
 import Channels from './pages/Channels';
 import Chat from './pages/Chat';
 import Briefing from './pages/Briefing';
+import Runs from './pages/Runs';
 import Cases from './pages/Cases';
 import Calendar from './pages/Calendar';
 import Analytics from './pages/Analytics';
@@ -61,6 +62,7 @@ export default function App() {
         <Route path="/channels" element={<Channels />} />
         <Route path="/chat" element={<Chat />} />
         <Route path="/briefing" element={<Briefing />} />
+        <Route path="/runs" element={<Runs />} />
         <Route path="/cases" element={<Cases />} />
         <Route path="/calendar" element={<Calendar />} />
         <Route path="/analytics" element={<Analytics />} />
