@@ -7,6 +7,9 @@
 
 import { createClient } from '@supabase/supabase-js';
 
+// Edge-runtime: snabb cold-start, riktig Web API Request, isolerad från
+// Node-bundling-strul (t.ex. när pdf-parse i andra functions påverkar load).
+export const runtime = 'edge';
 export const maxDuration = 30;
 
 type RunType = 'daily-brief' | 'weekly-content-plan' | 'weekly-review';
