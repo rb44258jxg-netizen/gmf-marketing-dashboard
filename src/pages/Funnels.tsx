@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   createAudienceMember,
+  findExistingEmails,
   getFunnelStats,
   KIND_LABEL,
   listAudienceEvents,
@@ -22,6 +23,7 @@ import {
   type FunnelStep,
   type MemberStatus,
 } from '../lib/audience';
+import { exampleCsv, parseLeadsCsv } from '../lib/leadsCsv';
 import { logAudit } from '../lib/audit';
 
 const KIND_TABS: AudienceKind[] = ['investor', 'project_owner'];
@@ -33,6 +35,7 @@ export default function Funnels() {
   const [stats, setStats] = useState<Record<string, FunnelStats>>({});
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [selected, setSelected] = useState<AudienceMember | null>(null);
   const [statusFilter, setStatusFilter] = useState<MemberStatus | 'alla'>('alla');
 
@@ -83,9 +86,15 @@ export default function Funnels() {
             </button>
           ))}
           <button
+            className="header-link"
+            onClick={() => setShowImport(true)}
+            style={{ marginLeft: 'auto' }}
+          >
+            📥 Importera CSV
+          </button>
+          <button
             className="header-link primary"
             onClick={() => setShowAdd(true)}
-            style={{ marginLeft: 'auto' }}
           >
             + Lägg till lead
           </button>
@@ -174,6 +183,21 @@ export default function Funnels() {
           onSaved={async () => {
             setShowAdd(false);
             await load();
+          }}
+        />
+      )}
+
+      {showImport && (
+        <ImportLeadsModal
+          kind={kind}
+          funnels={funnels}
+          onClose={() => setShowImport(false)}
+          onSaved={async (summary) => {
+            setShowImport(false);
+            await load();
+            window.alert(
+              `Klart!\n\n✓ ${summary.saved} importerade\n${summary.skipped > 0 ? `⏭ ${summary.skipped} hoppade över (redan tillagda)\n` : ''}${summary.failed > 0 ? `⚠️ ${summary.failed} failade` : ''}`,
+            );
           }}
         />
       )}
@@ -418,6 +442,316 @@ function AddLeadModal({
           </button>
           <button className="btn-primary" onClick={handleSave} disabled={saving || !email.trim() || !funnelId}>
             {saving ? 'Sparar…' : 'Lägg till + tagga i MailerLite'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Bulk-importera leads (CSV / tab-paste)
+// ----------------------------------------------------------------------------
+
+function ImportLeadsModal({
+  kind,
+  funnels,
+  onClose,
+  onSaved,
+}: {
+  kind: AudienceKind;
+  funnels: Funnel[];
+  onClose: () => void;
+  onSaved: (summary: { saved: number; skipped: number; failed: number }) => void | Promise<void>;
+}) {
+  const [text, setText] = useState('');
+  const [funnelId, setFunnelId] = useState<string>(funnels[0]?.id ?? '');
+  const [source, setSource] = useState<string>('csv-import');
+  const [tagMailerLite, setTagMailerLite] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const parsed = useMemo(() => parseLeadsCsv(text), [text]);
+
+  function loadExample() {
+    setText(exampleCsv(kind));
+  }
+
+  async function handleImport() {
+    if (parsed.rows.length === 0) {
+      setErr('Inga rader att importera.');
+      return;
+    }
+    if (!funnelId) {
+      setErr('Välj en funnel.');
+      return;
+    }
+    setImporting(true);
+    setErr(null);
+
+    let saved = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    try {
+      // Kolla dubbletter i en batch
+      const existing = await findExistingEmails(parsed.rows.map((r) => r.email));
+
+      const funnel = funnels.find((f) => f.id === funnelId);
+
+      for (let i = 0; i < parsed.rows.length; i++) {
+        const r = parsed.rows[i];
+        setProgress({ current: i + 1, total: parsed.rows.length });
+
+        if (existing.has(r.email)) {
+          skipped++;
+          continue;
+        }
+        try {
+          const member = await createAudienceMember({
+            kind,
+            email: r.email,
+            full_name: r.full_name,
+            phone: r.phone,
+            external_id: r.external_id,
+            registered_at: r.registered_at,
+            funnel_id: funnelId,
+            source,
+          });
+          await logAudienceEvent({
+            audience_member_id: member.id,
+            event_type: 'joined',
+            data: { funnel_id: funnelId, source, via: 'csv-import' },
+          });
+
+          if (tagMailerLite && funnel) {
+            const ml = await subscribeToMailerLite({
+              email: r.email,
+              full_name: r.full_name,
+              funnel_kind: kind,
+              funnel_name: funnel.name,
+            });
+            if (ml.ok && ml.subscriber_id) {
+              await updateAudienceMember(member.id, { mailerlite_subscriber_id: ml.subscriber_id });
+              await logAudienceEvent({
+                audience_member_id: member.id,
+                event_type: 'mailerlite_synced',
+                data: { subscriber_id: ml.subscriber_id },
+              });
+            }
+            // Failure ignoreras — best-effort
+          }
+
+          saved++;
+        } catch (e) {
+          failed++;
+          // eslint-disable-next-line no-console
+          console.error('Import-fel för', r.email, e);
+        }
+      }
+
+      await logAudit({
+        action: 'audience_member.bulk_import',
+        entity_type: 'audience_member',
+        entity_id: funnelId,
+        before: null,
+        after: { saved, skipped, failed, total: parsed.rows.length },
+      });
+      await onSaved({ saved, skipped, failed });
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setImporting(false);
+      setProgress(null);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 760 }}>
+        <h2 style={{ marginTop: 0 }}>📥 Importera {KIND_LABEL[kind].toLowerCase()} i bulk</h2>
+
+        <div
+          style={{
+            background: 'var(--soft-cloud)',
+            padding: 12,
+            borderRadius: 8,
+            fontSize: 12,
+            lineHeight: 1.6,
+            marginBottom: 14,
+          }}
+        >
+          <strong>Hur:</strong> kopiera från Excel/Google Sheets eller exportera CSV från
+          finance.greenmerc.com/admin/investerare och paste:a nedan. Stödda kolumner:
+          <br />
+          <code style={{ fontSize: 11 }}>email · namn · telefon · registrerad · id</code>
+          <br />
+          <button className="content-action-btn" onClick={loadExample} style={{ marginTop: 6 }}>
+            Använd exempeldata
+          </button>
+        </div>
+
+        <label className="persona-input-label">Klistra in CSV eller tab-separerad data</label>
+        <textarea
+          className="persona-input"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={10}
+          placeholder={'email,namn,telefon,registrerad,id\nanna@example.com,Anna Andersson,+46701234567,2026-05-01,12345\nper@example.com,Per Persson,,2026-05-02,12346'}
+          style={{
+            resize: 'vertical',
+            fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+            fontSize: 12,
+          }}
+        />
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 6 }}>
+          <label className="persona-input-label" style={{ gridColumn: '1 / 2' }}>
+            Funnel
+            <select className="persona-input" value={funnelId} onChange={(e) => setFunnelId(e.target.value)}>
+              {funnels.length === 0 && <option value="">Ingen funnel</option>}
+              {funnels.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="persona-input-label" style={{ gridColumn: '2 / 3' }}>
+            Källa-tag
+            <select className="persona-input" value={source} onChange={(e) => setSource(e.target.value)}>
+              <option value="csv-import">CSV-import</option>
+              <option value="finance.greenmerc.com">finance.greenmerc.com (registrerad)</option>
+              <option value="manuell">Manuell (av teamet)</option>
+              <option value="linkedin">LinkedIn</option>
+            </select>
+          </label>
+        </div>
+
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 12,
+            marginTop: 8,
+            color: 'var(--muted-foreground)',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={tagMailerLite}
+            onChange={(e) => setTagMailerLite(e.target.checked)}
+          />
+          Försök tagga i MailerLite (best-effort — om Vercel-API:t hänger sparas leads ändå)
+        </label>
+
+        {/* Förhandsvisning */}
+        {(parsed.rows.length > 0 || parsed.errors.length > 0 || parsed.warnings.length > 0) && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+              Förhandsvisning ({parsed.rows.length} giltiga rader)
+            </div>
+            {parsed.errors.length > 0 && (
+              <div style={{ fontSize: 12, color: 'var(--destructive, #c33)', marginBottom: 6 }}>
+                {parsed.errors.map((e, i) => (
+                  <div key={i}>⛔ {e}</div>
+                ))}
+              </div>
+            )}
+            {parsed.warnings.length > 0 && (
+              <div
+                style={{
+                  fontSize: 11,
+                  color: 'var(--yellow, #b07d00)',
+                  marginBottom: 6,
+                  maxHeight: 80,
+                  overflow: 'auto',
+                }}
+              >
+                {parsed.warnings.slice(0, 10).map((w, i) => (
+                  <div key={i}>⚠️ {w}</div>
+                ))}
+                {parsed.warnings.length > 10 && (
+                  <div>… och {parsed.warnings.length - 10} till</div>
+                )}
+              </div>
+            )}
+            {parsed.rows.length > 0 && (
+              <div
+                style={{
+                  maxHeight: 200,
+                  overflow: 'auto',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  fontSize: 11,
+                }}
+              >
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr 0.7fr 0.8fr',
+                    gap: 8,
+                    padding: '6px 10px',
+                    background: 'var(--soft-cloud)',
+                    fontWeight: 700,
+                    color: 'var(--muted-foreground)',
+                    textTransform: 'uppercase',
+                    fontSize: 10,
+                  }}
+                >
+                  <div>E-post</div>
+                  <div>Namn</div>
+                  <div>Telefon</div>
+                  <div>Reggad</div>
+                </div>
+                {parsed.rows.slice(0, 20).map((r, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr 0.7fr 0.8fr',
+                      gap: 8,
+                      padding: '4px 10px',
+                      borderTop: '1px solid var(--border)',
+                    }}
+                  >
+                    <div style={{ fontFamily: 'ui-monospace, monospace' }}>{r.email}</div>
+                    <div>{r.full_name ?? '—'}</div>
+                    <div>{r.phone ?? '—'}</div>
+                    <div>{r.registered_at?.slice(0, 10) ?? '—'}</div>
+                  </div>
+                ))}
+                {parsed.rows.length > 20 && (
+                  <div style={{ padding: '4px 10px', color: 'var(--muted-foreground)' }}>
+                    … och {parsed.rows.length - 20} till
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {progress && (
+          <div style={{ fontSize: 12, marginTop: 10, color: 'var(--deep-teal)' }}>
+            Importerar {progress.current} / {progress.total}…
+          </div>
+        )}
+        {err && <div style={{ fontSize: 12, color: 'var(--destructive, #c33)', marginTop: 8 }}>{err}</div>}
+
+        <div className="modal-actions" style={{ marginTop: 14 }}>
+          <button className="btn-secondary" onClick={onClose} disabled={importing}>
+            Avbryt
+          </button>
+          <button
+            className="btn-primary"
+            onClick={handleImport}
+            disabled={importing || parsed.rows.length === 0 || !funnelId}
+          >
+            {importing
+              ? `Importerar… ${progress?.current ?? 0} / ${parsed.rows.length}`
+              : `Importera ${parsed.rows.length} ${parsed.rows.length === 1 ? 'lead' : 'leads'}`}
           </button>
         </div>
       </div>
