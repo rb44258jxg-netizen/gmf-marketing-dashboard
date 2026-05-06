@@ -52,6 +52,13 @@ const STATUS_COLORS: Record<string, string> = {
   publicerad: 'var(--deep-teal)',
 };
 
+const ACTIVITY_STATUS_COLORS: Record<string, string> = {
+  planerad: 'var(--muted-foreground)',
+  redo: 'var(--green)',
+  publicerad: 'var(--deep-teal)',
+  inställd: 'var(--destructive)',
+};
+
 type ViewMode = 'month' | 'week' | 'list';
 
 // Filter-typer — ett enhetligt namn som täcker både content_items.type och activity.type/channel.
@@ -466,10 +473,12 @@ export default function Calendar() {
               {monthName}
             </span>
           </div>
-          <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--muted-foreground)' }}>
-            <span><span style={{ color: 'var(--blue)' }}>●</span> GMF</span>
-            <span><span style={{ color: 'var(--purple)' }}>●</span> Case</span>
-            <span><span style={{ color: 'var(--destructive)' }}>●</span> Deadline</span>
+          <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--muted-foreground)', flexWrap: 'wrap' }}>
+            <span><span style={{ color: 'var(--muted-foreground)' }}>●</span> Planerad</span>
+            <span><span style={{ color: 'var(--green)' }}>●</span> Redo</span>
+            <span><span style={{ color: 'var(--deep-teal)' }}>●</span> Publicerad</span>
+            <span style={{ marginLeft: 8 }}>🎯 Kampanj</span>
+            <span><span style={{ color: 'var(--destructive)' }}>●</span> Case-event</span>
           </div>
         </div>
 
@@ -494,7 +503,7 @@ export default function Calendar() {
                 key={i}
                 onClick={() => inMonth && setShowAdd(iso)}
                 style={{
-                  minHeight: 100,
+                  minHeight: 130,
                   padding: 6,
                   border: '1px solid var(--border)',
                   borderRadius: 8,
@@ -507,13 +516,35 @@ export default function Calendar() {
               >
                 <div
                   style={{
-                    fontSize: 12,
-                    fontWeight: isToday ? 800 : 600,
-                    color: isToday ? 'var(--deep-teal)' : 'var(--foreground)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
                     marginBottom: 4,
                   }}
                 >
-                  {day.getDate()}
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: isToday ? 800 : 600,
+                      color: isToday ? 'var(--deep-teal)' : 'var(--foreground)',
+                    }}
+                  >
+                    {day.getDate()}
+                  </span>
+                  {(dayItems.length + dayActivities.length) > 0 && (
+                    <span
+                      style={{
+                        fontSize: 9,
+                        padding: '1px 5px',
+                        borderRadius: 8,
+                        background: 'var(--soft-cloud)',
+                        color: 'var(--muted-foreground)',
+                        fontWeight: 700,
+                      }}
+                    >
+                      {dayItems.length + dayActivities.length}
+                    </span>
+                  )}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                   {events.map((ev, j) => (
@@ -535,7 +566,7 @@ export default function Calendar() {
                       {ev.kind === 'open' ? '▶' : '⏰'} {ev.case.name}
                     </Link>
                   ))}
-                  {dayItems.slice(0, 3).map((it) => {
+                  {dayItems.slice(0, 4).map((it) => {
                     const trackColor = it.track ? TRACK_COLORS[it.track] : 'var(--muted-foreground)';
                     return (
                       <Link
@@ -573,12 +604,29 @@ export default function Calendar() {
                       </Link>
                     );
                   })}
-                  {dayItems.length > 3 && (
-                    <div style={{ fontSize: 10, color: 'var(--muted-foreground)', padding: '2px 5px' }}>
-                      +{dayItems.length - 3} till
-                    </div>
+                  {dayItems.length > 4 && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setWeekAnchor(mondayOf(day));
+                        setView('week');
+                      }}
+                      style={{
+                        fontSize: 10,
+                        color: 'var(--deep-teal)',
+                        padding: '2px 5px',
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        fontWeight: 600,
+                      }}
+                      title="Visa veckovy med alla aktiviteter denna dag"
+                    >
+                      +{dayItems.length - 4} till →
+                    </button>
                   )}
-                  {dayActivities.slice(0, 3).map((a) => (
+                  {dayActivities.slice(0, 4).map((a) => (
                     <div
                       key={`act-${a.id}`}
                       onClick={(e) => {
@@ -599,18 +647,56 @@ export default function Calendar() {
                         whiteSpace: 'nowrap',
                         textOverflow: 'ellipsis',
                         cursor: 'pointer',
-                        opacity: a.status === 'publicerad' ? 0.65 : 1,
+                        opacity: a.status === 'publicerad' ? 0.6 : 1,
                       }}
-                      title={`${ACTIVITY_TYPE_LABEL[a.type]}: ${a.title} — ${a.status}`}
+                      title={`${ACTIVITY_TYPE_LABEL[a.type]}: ${a.title} — ${a.status}${a.campaign ? ` · ${a.campaign}` : ''}`}
                     >
                       <span>{ACTIVITY_TYPE_ICON[a.type]}</span>
+                      <span
+                        style={{
+                          width: 5,
+                          height: 5,
+                          borderRadius: '50%',
+                          background: ACTIVITY_STATUS_COLORS[a.status] ?? 'gray',
+                          flexShrink: 0,
+                        }}
+                      />
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.title}</span>
+                      {a.campaign && (
+                        <span
+                          style={{
+                            fontSize: 8,
+                            color: 'var(--muted-foreground)',
+                            flexShrink: 0,
+                          }}
+                          title={`Kampanj: ${a.campaign}`}
+                        >
+                          🎯
+                        </span>
+                      )}
                     </div>
                   ))}
-                  {dayActivities.length > 3 && (
-                    <div style={{ fontSize: 10, color: 'var(--muted-foreground)', padding: '2px 5px' }}>
-                      +{dayActivities.length - 3} aktiviteter
-                    </div>
+                  {dayActivities.length > 4 && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setWeekAnchor(mondayOf(day));
+                        setView('week');
+                      }}
+                      style={{
+                        fontSize: 10,
+                        color: 'var(--deep-teal)',
+                        padding: '2px 5px',
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        fontWeight: 600,
+                      }}
+                      title="Visa veckovy med alla aktiviteter denna dag"
+                    >
+                      +{dayActivities.length - 4} aktiviteter →
+                    </button>
                   )}
                 </div>
               </div>
