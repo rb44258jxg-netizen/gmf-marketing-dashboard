@@ -213,7 +213,7 @@ function fmt(n: number | null): string {
 // ============================================================================
 
 const STATUS_BADGE: Record<ActivityStatus, { label: string; color: string }> = {
-  planerad: { label: 'Planerad', color: 'var(--muted-foreground)' },
+  planerad: { label: 'Planerad', color: 'var(--blue)' },
   redo: { label: 'Redo', color: 'var(--green)' },
   publicerad: { label: 'Publicerad', color: 'var(--deep-teal)' },
   inställd: { label: 'Inställd', color: 'var(--destructive)' },
@@ -319,23 +319,42 @@ function TodayModule() {
             Imorgon ({tomorrow.length})
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {tomorrow.slice(0, 3).map((a) => (
-              <div
-                key={a.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  fontSize: 12,
-                  color: 'var(--muted-foreground)',
-                  padding: '4px 0',
-                }}
-              >
-                <span>{ACTIVITY_TYPE_ICON[a.type]}</span>
-                <span style={{ flex: 1 }}>{a.title}</span>
-                <span style={{ fontSize: 10, opacity: 0.7 }}>{ACTIVITY_TYPE_LABEL[a.type]}</span>
-              </div>
-            ))}
+            {tomorrow.slice(0, 3).map((a) => {
+              const badge = STATUS_BADGE[a.status];
+              return (
+                <div
+                  key={a.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    fontSize: 12,
+                    color: 'var(--muted-foreground)',
+                    padding: '4px 0',
+                    minWidth: 0,
+                  }}
+                >
+                  <span style={{ flexShrink: 0 }}>{ACTIVITY_TYPE_ICON[a.type]}</span>
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--foreground)' }}>{a.title}</span>
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 700,
+                      padding: '1px 6px',
+                      borderRadius: 10,
+                      background: badge.color,
+                      color: 'white',
+                      textTransform: 'uppercase',
+                      letterSpacing: 0.4,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {badge.label}
+                  </span>
+                  <span style={{ fontSize: 10, opacity: 0.7, flexShrink: 0 }}>{ACTIVITY_TYPE_LABEL[a.type]}</span>
+                </div>
+              );
+            })}
             {tomorrow.length > 3 && (
               <Link
                 to="/plan?view=list"

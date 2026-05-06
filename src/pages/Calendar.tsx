@@ -53,7 +53,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const ACTIVITY_STATUS_COLORS: Record<string, string> = {
-  planerad: 'var(--muted-foreground)',
+  planerad: 'var(--blue)',
   redo: 'var(--green)',
   publicerad: 'var(--deep-teal)',
   inställd: 'var(--destructive)',
@@ -474,7 +474,7 @@ export default function Calendar() {
             </span>
           </div>
           <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--muted-foreground)', flexWrap: 'wrap' }}>
-            <span><span style={{ color: 'var(--muted-foreground)' }}>●</span> Planerad</span>
+            <span><span style={{ color: 'var(--blue)' }}>●</span> Planerad</span>
             <span><span style={{ color: 'var(--green)' }}>●</span> Redo</span>
             <span><span style={{ color: 'var(--deep-teal)' }}>●</span> Publicerad</span>
             <span style={{ marginLeft: 8 }}>🎯 Kampanj</span>
@@ -504,6 +504,8 @@ export default function Calendar() {
                 onClick={() => inMonth && setShowAdd(iso)}
                 style={{
                   minHeight: 130,
+                  minWidth: 0,
+                  overflow: 'hidden',
                   padding: 6,
                   border: '1px solid var(--border)',
                   borderRadius: 8,
@@ -593,14 +595,14 @@ export default function Calendar() {
                         <span>{TYPE_ICONS[it.type]}</span>
                         <span
                           style={{
-                            width: 5,
-                            height: 5,
+                            width: 7,
+                            height: 7,
                             borderRadius: '50%',
                             background: STATUS_COLORS[it.status] ?? 'gray',
                             flexShrink: 0,
                           }}
                         />
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.title}</span>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: 1 }}>{it.title}</span>
                       </Link>
                     );
                   })}
@@ -654,14 +656,14 @@ export default function Calendar() {
                       <span>{ACTIVITY_TYPE_ICON[a.type]}</span>
                       <span
                         style={{
-                          width: 5,
-                          height: 5,
+                          width: 7,
+                          height: 7,
                           borderRadius: '50%',
                           background: ACTIVITY_STATUS_COLORS[a.status] ?? 'gray',
                           flexShrink: 0,
                         }}
                       />
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.title}</span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: 1 }}>{a.title}</span>
                       {a.campaign && (
                         <span
                           style={{
@@ -851,12 +853,13 @@ function WeekView({
               onClick={() => onPickDate(iso)}
               style={{
                 minHeight: 280,
+                minWidth: 0,
+                overflow: 'hidden',
                 padding: 8,
-                border: '1px solid var(--border)',
+                border: isToday ? '2px solid var(--deep-teal)' : '1px solid var(--border)',
                 borderRadius: 8,
-                background: 'var(--card)',
+                background: isToday ? 'rgba(29, 135, 117, 0.04)' : 'var(--card)',
                 cursor: 'pointer',
-                ...(isToday ? { borderColor: 'var(--deep-teal)', borderWidth: 2 } : {}),
               }}
             >
               <div
@@ -933,7 +936,7 @@ function WeekView({
                           flexShrink: 0,
                         }}
                       />
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1 }}>
                         {it.title}
                       </span>
                     </Link>
@@ -959,18 +962,49 @@ function WeekView({
                       alignItems: 'center',
                       gap: 4,
                     }}
-                    title={`${ACTIVITY_TYPE_LABEL[a.type]}: ${a.title} — ${a.status}`}
+                    title={`${ACTIVITY_TYPE_LABEL[a.type]}: ${a.title} — ${a.status}${a.campaign ? ` · ${a.campaign}` : ''}`}
                   >
                     <span>{ACTIVITY_TYPE_ICON[a.type]}</span>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span
+                      style={{
+                        width: 7,
+                        height: 7,
+                        borderRadius: '50%',
+                        background: ACTIVITY_STATUS_COLORS[a.status] ?? 'gray',
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1 }}>
                       {a.title}
                     </span>
+                    {a.campaign && (
+                      <span style={{ fontSize: 10, opacity: 0.7, flexShrink: 0 }} title={`Kampanj: ${a.campaign}`}>
+                        🎯
+                      </span>
+                    )}
                   </div>
                 ))}
                 {events.length + dayItems.length + dayActivities.length === 0 && (
-                  <div style={{ fontSize: 11, color: 'var(--muted-foreground)', fontStyle: 'italic', padding: '4px 0' }}>
-                    Inget planerat
-                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onPickDate(iso);
+                    }}
+                    style={{
+                      fontSize: 11,
+                      color: 'var(--muted-foreground)',
+                      padding: '6px 8px',
+                      background: 'transparent',
+                      border: '1px dashed var(--border)',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      width: '100%',
+                    }}
+                    title="Lägg till innehåll på den här dagen"
+                  >
+                    + Lägg till
+                  </button>
                 )}
               </div>
             </div>
