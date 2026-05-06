@@ -233,30 +233,36 @@ export async function logAudienceEvent(input: {
 }
 
 // ----------------------------------------------------------------------------
-// MailerLite-subscribe (best-effort)
+// MailerLite-sync (push från dashboard till MailerLite)
+//
+// Anropas via Supabase Edge Function `mailerlite-sync` — separat infrastruktur
+// från Vercel, undviker arn1-flappen. Dashboarden är master, MailerLite får
+// pushed subscribers + custom fields som triggar deras automations.
 // ----------------------------------------------------------------------------
 
 export async function subscribeToMailerLite(input: {
+  audience_member_id?: string;
   email: string;
   full_name?: string | null;
+  phone?: string | null;
   funnel_kind: AudienceKind;
   funnel_name: string;
+  status?: string;
+  segment_tags?: string[];
+  conversion_value?: number | null;
 }): Promise<{ ok: true; subscriber_id?: string } | { ok: false; error: string }> {
   try {
-    const res = await fetch('/api/audience-subscribe', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
+    const { data, error } = await supabase.functions.invoke('mailerlite-sync', {
+      body: input,
     });
-    const raw = await res.text();
-    let body: { subscriber_id?: string; error?: string } = {};
-    try {
-      body = JSON.parse(raw);
-    } catch {
-      return { ok: false, error: `Icke-JSON svar (HTTP ${res.status}): ${raw.slice(0, 100)}` };
+    if (error) {
+      return { ok: false, error: error.message ?? String(error) };
     }
-    if (!res.ok) return { ok: false, error: body.error ?? `HTTP ${res.status}` };
-    return { ok: true, subscriber_id: body.subscriber_id };
+    const result = data as { ok?: boolean; subscriber_id?: string; error?: string };
+    if (result?.ok === false || result?.error) {
+      return { ok: false, error: result?.error ?? 'okänt fel' };
+    }
+    return { ok: true, subscriber_id: result?.subscriber_id };
   } catch (e) {
     return { ok: false, error: String(e) };
   }
