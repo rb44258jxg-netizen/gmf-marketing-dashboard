@@ -54,6 +54,47 @@ const STATUS_COLORS: Record<string, string> = {
 
 type ViewMode = 'month' | 'week' | 'list';
 
+// Filter-typer — ett enhetligt namn som täcker både content_items.type och activity.type/channel.
+type FilterType =
+  | 'blogg'
+  | 'social'
+  | 'email'
+  | 'annons'
+  | 'event'
+  | 'pr'
+  | 'web';
+
+const FILTER_TYPE_LABEL: Record<FilterType, string> = {
+  blogg: '📝 Blogg',
+  social: '💼 Social',
+  email: '✉️ E-post',
+  annons: '📢 Annons',
+  event: '📅 Event',
+  pr: '📰 PR',
+  web: '🌐 Webb',
+};
+
+const FILTER_TYPES: FilterType[] = ['blogg', 'social', 'email', 'annons', 'event', 'pr', 'web'];
+
+function itemMatchesFilterType(it: CalendarItem, t: FilterType): boolean {
+  if (t === 'blogg') return it.type === 'blogg';
+  if (t === 'social') return it.type === 'linkedin';
+  if (t === 'email') return it.type === 'email';
+  if (t === 'annons') return it.type === 'annons';
+  if (t === 'web') return it.type === 'web';
+  return false; // event/pr finns bara på activities
+}
+
+function activityMatchesFilterType(a: MarketingActivity, t: FilterType): boolean {
+  if (t === 'social') return a.type === 'social_post';
+  if (t === 'email') return a.type === 'email_campaign';
+  if (t === 'annons') return a.type === 'ad';
+  if (t === 'event') return a.type === 'event';
+  if (t === 'pr') return a.type === 'pr';
+  // blogg/web finns bara på content_items
+  return false;
+}
+
 export default function Calendar() {
   const [params, setParams] = useSearchParams();
   const view = ((): ViewMode => {
@@ -65,6 +106,32 @@ export default function Calendar() {
     const next = new URLSearchParams(params);
     if (v === 'month') next.delete('view');
     else next.set('view', v);
+    setParams(next, { replace: true });
+  }
+
+  // Filter — typ + kampanj. URL-baserade så de delas via länk.
+  const filterType = ((): FilterType | null => {
+    const v = params.get('type');
+    return FILTER_TYPES.includes(v as FilterType) ? (v as FilterType) : null;
+  })();
+  const filterCampaign = params.get('campaign') ?? null;
+
+  function setFilterType(t: FilterType | null) {
+    const next = new URLSearchParams(params);
+    if (t) next.set('type', t);
+    else next.delete('type');
+    setParams(next, { replace: true });
+  }
+  function setFilterCampaign(c: string | null) {
+    const next = new URLSearchParams(params);
+    if (c) next.set('campaign', c);
+    else next.delete('campaign');
+    setParams(next, { replace: true });
+  }
+  function clearFilters() {
+    const next = new URLSearchParams(params);
+    next.delete('type');
+    next.delete('campaign');
     setParams(next, { replace: true });
   }
 
@@ -109,6 +176,35 @@ export default function Calendar() {
 
   const grid = useMemo(() => buildMonthGrid(month.year, month.month), [month]);
 
+  // Tillgängliga kampanjer — alla unika campaign-värden från activities.
+  const availableCampaigns = useMemo(() => {
+    const set = new Set<string>();
+    activities.forEach((a) => {
+      if (a.campaign && a.campaign.trim()) set.add(a.campaign.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'sv'));
+  }, [activities]);
+
+  // Filtrerade arrayer — används av alla tre vyer.
+  const filteredItems = useMemo(() => {
+    return items.filter((it) => {
+      // Kampanj-filter — content_items har ingen kampanj, så de göms när kampanj är vald.
+      if (filterCampaign) return false;
+      if (filterType && !itemMatchesFilterType(it, filterType)) return false;
+      return true;
+    });
+  }, [items, filterType, filterCampaign]);
+
+  const filteredActivities = useMemo(() => {
+    return activities.filter((a) => {
+      if (filterCampaign && a.campaign !== filterCampaign) return false;
+      if (filterType && !activityMatchesFilterType(a, filterType)) return false;
+      return true;
+    });
+  }, [activities, filterType, filterCampaign]);
+
+  const filtersActive = filterType !== null || filterCampaign !== null;
+
   function shift(delta: number) {
     const d = new Date(month.year, month.month + delta, 1);
     setMonth({ year: d.getFullYear(), month: d.getMonth() });
@@ -130,11 +226,11 @@ export default function Calendar() {
   }
 
   function itemsForDate(iso: string): CalendarItem[] {
-    return items.filter((i) => i.scheduled_for === iso);
+    return filteredItems.filter((i) => i.scheduled_for === iso);
   }
 
   function activitiesForDate(iso: string): MarketingActivity[] {
-    return activities.filter((a) => a.scheduled_for === iso);
+    return filteredActivities.filter((a) => a.scheduled_for === iso);
   }
 
   function caseEventsForDate(iso: string): Array<{ case: CaseRef; kind: 'open' | 'close' }> {
@@ -225,6 +321,78 @@ export default function Calendar() {
               </button>
             ))}
           </div>
+          <select
+            value={filterType ?? ''}
+            onChange={(e) => setFilterType((e.target.value || null) as FilterType | null)}
+            style={{
+              padding: '6px 10px',
+              fontSize: 12,
+              fontWeight: 600,
+              borderRadius: 6,
+              border: '1px solid rgba(255,255,255,0.35)',
+              background: filterType ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.15)',
+              color: filterType ? 'var(--deep-teal)' : 'white',
+              cursor: 'pointer',
+            }}
+            title="Filtrera på typ"
+          >
+            <option value="">Alla typer</option>
+            {FILTER_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {FILTER_TYPE_LABEL[t]}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={filterCampaign ?? ''}
+            onChange={(e) => setFilterCampaign(e.target.value || null)}
+            disabled={availableCampaigns.length === 0}
+            style={{
+              padding: '6px 10px',
+              fontSize: 12,
+              fontWeight: 600,
+              borderRadius: 6,
+              border: '1px solid rgba(255,255,255,0.35)',
+              background: filterCampaign ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.15)',
+              color: filterCampaign ? 'var(--deep-teal)' : 'white',
+              cursor: availableCampaigns.length === 0 ? 'not-allowed' : 'pointer',
+              opacity: availableCampaigns.length === 0 ? 0.5 : 1,
+              maxWidth: 200,
+            }}
+            title={
+              availableCampaigns.length === 0
+                ? 'Inga kampanjer ännu'
+                : 'Filtrera på kampanj'
+            }
+          >
+            <option value="">Alla kampanjer</option>
+            {availableCampaigns.map((c) => (
+              <option key={c} value={c}>
+                🎯 {c}
+              </option>
+            ))}
+          </select>
+
+          {filtersActive && (
+            <button
+              onClick={clearFilters}
+              style={{
+                padding: '6px 10px',
+                fontSize: 11,
+                fontWeight: 600,
+                borderRadius: 6,
+                border: '1px solid rgba(255,255,255,0.35)',
+                background: 'transparent',
+                color: 'white',
+                cursor: 'pointer',
+              }}
+              title="Rensa alla filter"
+            >
+              ✕ Rensa
+            </button>
+          )}
+
           <button
             className="header-link primary"
             onClick={() => setShowImportPlan(true)}
@@ -236,6 +404,23 @@ export default function Calendar() {
             + Aktivitet
           </button>
         </div>
+        {filtersActive && (
+          <div
+            style={{
+              marginTop: 10,
+              fontSize: 11,
+              color: 'rgba(255,255,255,0.85)',
+              fontStyle: 'italic',
+            }}
+          >
+            {filterCampaign && (
+              <span>Visar kampanj: <strong>{filterCampaign}</strong> (innehållsbibliotek dolt — content_items har ingen kampanj-koppling)</span>
+            )}
+            {!filterCampaign && filterType && (
+              <span>Visar typ: <strong>{FILTER_TYPE_LABEL[filterType]}</strong></span>
+            )}
+          </div>
+        )}
       </div>
 
       {error && <div className="auth-error">{error}</div>}
@@ -243,8 +428,8 @@ export default function Calendar() {
       {view === 'week' && (
         <WeekView
           anchor={weekAnchor}
-          items={items}
-          activities={activities}
+          items={filteredItems}
+          activities={filteredActivities}
           cases={cases}
           today={today}
           onShift={shiftWeek}
@@ -256,8 +441,8 @@ export default function Calendar() {
 
       {view === 'list' && (
         <AgendaView
-          items={items}
-          activities={activities}
+          items={filteredItems}
+          activities={filteredActivities}
           cases={cases}
           today={today}
           onPickActivity={(a) => setSelectedActivity(a)}
