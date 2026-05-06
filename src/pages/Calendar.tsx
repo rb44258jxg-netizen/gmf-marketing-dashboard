@@ -9,7 +9,11 @@ import {
   ACTIVITY_TYPE_LABEL,
   CHANNELS,
   createActivity,
+  deleteActivity,
+  findChannel,
   listActivities,
+  updateActivity,
+  type ActivityStatus,
   type ActivityType,
   type MarketingActivity,
 } from '../lib/activities';
@@ -61,6 +65,7 @@ export default function Calendar() {
   const [draftType, setDraftType] = useState<ContentType>('linkedin');
   const [busy, setBusy] = useState(false);
   const [showActivityForm, setShowActivityForm] = useState(false);
+  const [selectedActivity, setSelectedActivity] = useState<MarketingActivity | null>(null);
 
   async function load() {
     const [itemsRes, casesRes, activitiesPromise] = await Promise.all([
@@ -299,7 +304,10 @@ export default function Calendar() {
                   {dayActivities.slice(0, 3).map((a) => (
                     <div
                       key={`act-${a.id}`}
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedActivity(a);
+                      }}
                       style={{
                         fontSize: 10,
                         padding: '2px 5px',
@@ -313,6 +321,8 @@ export default function Calendar() {
                         overflow: 'hidden',
                         whiteSpace: 'nowrap',
                         textOverflow: 'ellipsis',
+                        cursor: 'pointer',
+                        opacity: a.status === 'publicerad' ? 0.65 : 1,
                       }}
                       title={`${ACTIVITY_TYPE_LABEL[a.type]}: ${a.title} — ${a.status}`}
                     >
@@ -337,6 +347,20 @@ export default function Calendar() {
           onClose={() => setShowActivityForm(false)}
           onSaved={async () => {
             setShowActivityForm(false);
+            await load();
+          }}
+        />
+      )}
+
+      {selectedActivity && (
+        <ActivityDetailModal
+          activity={selectedActivity}
+          onClose={() => setSelectedActivity(null)}
+          onChanged={async () => {
+            await load();
+          }}
+          onDeleted={async () => {
+            setSelectedActivity(null);
             await load();
           }}
         />
@@ -384,6 +408,280 @@ export default function Calendar() {
       )}
     </>
   );
+}
+
+function ActivityDetailModal({
+  activity,
+  onClose,
+  onChanged,
+  onDeleted,
+}: {
+  activity: MarketingActivity;
+  onClose: () => void;
+  onChanged: (next: MarketingActivity) => void | Promise<void>;
+  onDeleted: () => void | Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(activity.title);
+  const [body, setBody] = useState(activity.body ?? '');
+  const [scheduledFor, setScheduledFor] = useState(activity.scheduled_for ?? '');
+  const [status, setStatus] = useState<ActivityStatus>(activity.status);
+  const [externalUrl, setExternalUrl] = useState(activity.external_url ?? '');
+  const [copied, setCopied] = useState(false);
+
+  const channel = findChannel(activity.channel);
+
+  async function copyBody() {
+    if (!activity.body) return;
+    try {
+      await navigator.clipboard.writeText(activity.body);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      setErr('Kunde inte kopiera: ' + (e as Error).message);
+    }
+  }
+
+  async function copyAndOpen() {
+    await copyBody();
+    if (channel?.composerUrl) {
+      window.open(channel.composerUrl, '_blank', 'noopener,noreferrer');
+    }
+  }
+
+  async function markPublished() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const url = window.prompt(
+        'URL till den publicerade posten (valfri):',
+        activity.external_url ?? '',
+      );
+      const updated = await updateActivity(activity.id, {
+        status: 'publicerad',
+        external_url: url ? url.trim() : null,
+      });
+      await logAudit({
+        action: 'activity.publish',
+        entity_type: 'marketing_activity',
+        entity_id: activity.id,
+        before: activity,
+        after: updated,
+      });
+      await onChanged(updated);
+      onClose();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveEdits() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const updated = await updateActivity(activity.id, {
+        title: title.trim(),
+        body: body.trim() || null,
+        scheduled_for: scheduledFor || null,
+        status,
+        external_url: externalUrl.trim() || null,
+      });
+      await logAudit({
+        action: 'activity.update',
+        entity_type: 'marketing_activity',
+        entity_id: activity.id,
+        before: activity,
+        after: updated,
+      });
+      await onChanged(updated);
+      setEditing(false);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!window.confirm(`Radera "${activity.title}"? Det går inte att ångra.`)) return;
+    setBusy(true);
+    try {
+      await deleteActivity(activity.id);
+      await logAudit({
+        action: 'activity.delete',
+        entity_type: 'marketing_activity',
+        entity_id: activity.id,
+        before: activity,
+        after: null,
+      });
+      await onDeleted();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 640 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <span
+            className="badge"
+            style={{ background: ACTIVITY_TYPE_COLOR[activity.type] + '25', color: ACTIVITY_TYPE_COLOR[activity.type] }}
+          >
+            {ACTIVITY_TYPE_ICON[activity.type]} {ACTIVITY_TYPE_LABEL[activity.type]}
+          </span>
+          {channel && (
+            <span className="badge badge-gray">
+              {channel.icon} {channel.label}
+            </span>
+          )}
+          <span className={'badge ' + statusBadge(activity.status)}>{activity.status}</span>
+        </div>
+
+        {editing ? (
+          <>
+            <label className="persona-input-label">Titel</label>
+            <input className="persona-input" value={title} onChange={(e) => setTitle(e.target.value)} />
+
+            <label className="persona-input-label">Datum</label>
+            <input
+              className="persona-input"
+              type="date"
+              value={scheduledFor}
+              onChange={(e) => setScheduledFor(e.target.value)}
+            />
+
+            <label className="persona-input-label">Status</label>
+            <select
+              className="persona-input"
+              value={status}
+              onChange={(e) => setStatus(e.target.value as ActivityStatus)}
+            >
+              <option value="planerad">Planerad</option>
+              <option value="redo">Redo att publicera</option>
+              <option value="publicerad">Publicerad</option>
+              <option value="inställd">Inställd</option>
+            </select>
+
+            <label className="persona-input-label">URL till publicerad post</label>
+            <input
+              className="persona-input"
+              value={externalUrl}
+              onChange={(e) => setExternalUrl(e.target.value)}
+              placeholder="https://www.linkedin.com/posts/..."
+            />
+
+            <label className="persona-input-label">Innehåll / copy</label>
+            <textarea
+              className="persona-input"
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              rows={10}
+              style={{ resize: 'vertical', fontFamily: 'inherit' }}
+            />
+          </>
+        ) : (
+          <>
+            <h2 style={{ margin: '8px 0' }}>{activity.title}</h2>
+            <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 12 }}>
+              {activity.scheduled_for ? `Schemalagd ${activity.scheduled_for}` : 'Ej schemalagd'}
+              {activity.campaign && ` · Kampanj: ${activity.campaign}`}
+              {activity.published_at && ` · Publicerad ${new Date(activity.published_at).toLocaleString('sv-SE', { dateStyle: 'short', timeStyle: 'short' })}`}
+            </div>
+
+            {activity.external_url && (
+              <div style={{ marginBottom: 12 }}>
+                <a
+                  href={activity.external_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="header-link"
+                >
+                  🔗 Öppna publicerad post
+                </a>
+              </div>
+            )}
+
+            <div
+              style={{
+                fontSize: 13,
+                lineHeight: 1.6,
+                whiteSpace: 'pre-wrap',
+                background: 'var(--soft-cloud)',
+                padding: 12,
+                borderRadius: 8,
+                marginBottom: 12,
+                maxHeight: 280,
+                overflow: 'auto',
+              }}
+            >
+              {activity.body ? activity.body : <em style={{ color: 'var(--muted-foreground)' }}>Inget innehåll än. Klicka Redigera för att lägga till.</em>}
+            </div>
+          </>
+        )}
+
+        {err && <div style={{ fontSize: 12, color: 'var(--destructive, #c33)', marginBottom: 8 }}>{err}</div>}
+
+        <div className="modal-actions" style={{ flexWrap: 'wrap', gap: 8 }}>
+          {editing ? (
+            <>
+              <button className="btn-secondary" onClick={() => setEditing(false)} disabled={busy}>
+                Avbryt
+              </button>
+              <button className="btn-primary" onClick={saveEdits} disabled={busy || !title.trim()}>
+                {busy ? 'Sparar…' : 'Spara'}
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn-secondary" onClick={handleDelete} disabled={busy} style={{ marginRight: 'auto', color: 'var(--destructive, #c33)' }}>
+                🗑️ Radera
+              </button>
+              <button className="btn-secondary" onClick={() => setEditing(true)} disabled={busy}>
+                ✏️ Redigera
+              </button>
+              {activity.body && (
+                <button className="btn-secondary" onClick={copyBody} disabled={busy}>
+                  {copied ? '✓ Kopierat' : '📋 Kopiera text'}
+                </button>
+              )}
+              {channel?.composerUrl && (
+                <button className="btn-primary" onClick={copyAndOpen} disabled={busy}>
+                  🚀 Kopiera + öppna {channel.label}
+                </button>
+              )}
+              {activity.status !== 'publicerad' && (
+                <button className="btn-primary" onClick={markPublished} disabled={busy}>
+                  ✅ Markera publicerad
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function statusBadge(status: ActivityStatus): string {
+  switch (status) {
+    case 'planerad':
+      return 'badge-gray';
+    case 'redo':
+      return 'badge-yellow';
+    case 'publicerad':
+      return 'badge-green';
+    case 'inställd':
+      return 'badge-red';
+    default:
+      return 'badge-gray';
+  }
 }
 
 function AddActivityForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void | Promise<void> }) {
