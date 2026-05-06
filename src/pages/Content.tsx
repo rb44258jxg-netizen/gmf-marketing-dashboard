@@ -61,6 +61,7 @@ interface DraftItem {
   case_id: string;
   file: string;
   notes: string;
+  campaign: string;
 }
 
 const EMPTY_DRAFT: DraftItem = {
@@ -71,6 +72,7 @@ const EMPTY_DRAFT: DraftItem = {
   case_id: '',
   file: '',
   notes: '',
+  campaign: '',
 };
 
 interface CaseRef {
@@ -144,6 +146,7 @@ export default function Content() {
       case_id: (item as ContentItemRow & { case_id?: string | null }).case_id ?? '',
       file: item.file ?? '',
       notes: item.notes ?? '',
+      campaign: item.campaign ?? '',
     });
     setEditingId(item.id);
     setShowCreate(true);
@@ -171,6 +174,7 @@ export default function Content() {
       case_id: draft.case_id || null,
       file: draft.file.trim() || null,
       notes: draft.notes.trim() || null,
+      campaign: draft.campaign.trim() || null,
     } as ContentItemInsert & { case_id: string | null };
     if (editingId) {
       const before = items?.find((i) => i.id === editingId);
@@ -616,6 +620,13 @@ export default function Content() {
               value={draft.file}
               onChange={(e) => setDraft({ ...draft, file: e.target.value })}
               placeholder="t.ex. blogg_3_ecspr.md"
+            />
+            <label className="persona-input-label">Kampanj (valfri)</label>
+            <input
+              className="persona-input"
+              value={draft.campaign}
+              onChange={(e) => setDraft({ ...draft, campaign: e.target.value })}
+              placeholder="t.ex. Q2-rundan, KEY Experience-emission"
             />
             <label className="persona-input-label">Anteckningar</label>
             <textarea
