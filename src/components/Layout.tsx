@@ -8,6 +8,7 @@ const TABS = [
   { to: '/content', label: 'Innehåll' },
   { to: '/channels', label: 'Kanaler' },
   { to: '/cases', label: 'Cases' },
+  { to: '/funnels', label: 'Funnels' },
   { to: '/knowledge', label: 'Knowledge' },
   { to: '/insights', label: 'Insikter' },
 ];
