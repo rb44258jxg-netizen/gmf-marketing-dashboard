@@ -14,6 +14,22 @@ GreenMerc Finance marketing team's internal workspace — personas, content libr
 
 Phase 2 will add MailerLite + social channels. Phase 3 adds calendar + competitor refresh.
 
+## Status: Funnels pausad (2026-05-06)
+
+Funnels-fliken (lead-orkestrering, audience_members, MailerLite-sync via
+Edge Function, webhook-mottagare) är **dold via feature-flag** —
+GMF kör all subscriber-, segment-, automation- och mejl-orkestrering direkt
+i MailerLite tills vidare. Vår Funnel-funktion duplicerar i praktiken vad
+MailerLite redan gör bra.
+
+All kod ligger kvar i repo:t (Funnels.tsx, audience.ts, leadsCsv.ts,
+`supabase/functions/mailerlite-sync/`, `api/mailerlite-webhook.ts`,
+migration `20260506_010_funnels.sql`). Edge Function + webhook är
+fortfarande deployade och fungerar — bara UI-fliken är dold.
+
+För att slå på igen: sätt `FUNNELS_ENABLED = true` i
+`src/lib/featureFlags.ts` och pusha.
+
 ## Status: humans-only mode (2026-05-05)
 
 AI-anrop till `/api/chat`, `/api/case-extract`, `/api/case-plan`, `/api/briefing` och

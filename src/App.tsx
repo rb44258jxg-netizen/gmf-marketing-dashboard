@@ -12,6 +12,7 @@ import Cases from './pages/Cases';
 import Calendar from './pages/Calendar';
 import Insights from './pages/Insights';
 import Funnels from './pages/Funnels';
+import { FUNNELS_ENABLED } from './lib/featureFlags';
 
 export default function App() {
   const { session, loading } = useAuth();
@@ -65,7 +66,10 @@ export default function App() {
 
         <Route path="/chat" element={<Chat />} />
         <Route path="/cases" element={<Cases />} />
-        <Route path="/funnels" element={<Funnels />} />
+        <Route
+          path="/funnels"
+          element={FUNNELS_ENABLED ? <Funnels /> : <Navigate to="/" replace />}
+        />
 
         {/* Insikter-hub: Analytics + Briefing + Körningar + Audit */}
         <Route path="/insights" element={<Insights />} />
