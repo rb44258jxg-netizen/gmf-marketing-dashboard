@@ -176,6 +176,21 @@ export async function createAudienceMember(input: {
   return data as AudienceMember;
 }
 
+export async function findExistingEmails(emails: string[]): Promise<Set<string>> {
+  if (emails.length === 0) return new Set();
+  const lower = emails.map((e) => e.toLowerCase());
+  const { data, error } = await supabase
+    .from('audience_members')
+    .select('email')
+    .in('email', lower);
+  if (error) throw error;
+  const set = new Set<string>();
+  ((data as Array<{ email: string | null }>) ?? []).forEach((r) => {
+    if (r.email) set.add(r.email.toLowerCase());
+  });
+  return set;
+}
+
 export async function updateAudienceMember(id: string, patch: Partial<AudienceMember>): Promise<AudienceMember> {
   const { data, error } = await supabase
     .from('audience_members')
