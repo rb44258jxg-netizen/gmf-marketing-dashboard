@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { logAudit } from '../lib/audit';
 import type { ContentItemRow, ContentTrack, ContentType } from '../lib/database.types';
@@ -52,11 +52,102 @@ const STATUS_COLORS: Record<string, string> = {
   publicerad: 'var(--deep-teal)',
 };
 
+const ACTIVITY_STATUS_COLORS: Record<string, string> = {
+  planerad: 'var(--muted-foreground)',
+  redo: 'var(--green)',
+  publicerad: 'var(--deep-teal)',
+  inställd: 'var(--destructive)',
+};
+
+type ViewMode = 'month' | 'week' | 'list';
+
+// Filter-typer — ett enhetligt namn som täcker både content_items.type och activity.type/channel.
+type FilterType =
+  | 'blogg'
+  | 'social'
+  | 'email'
+  | 'annons'
+  | 'event'
+  | 'pr'
+  | 'web';
+
+const FILTER_TYPE_LABEL: Record<FilterType, string> = {
+  blogg: '📝 Blogg',
+  social: '💼 Social',
+  email: '✉️ E-post',
+  annons: '📢 Annons',
+  event: '📅 Event',
+  pr: '📰 PR',
+  web: '🌐 Webb',
+};
+
+const FILTER_TYPES: FilterType[] = ['blogg', 'social', 'email', 'annons', 'event', 'pr', 'web'];
+
+function itemMatchesFilterType(it: CalendarItem, t: FilterType): boolean {
+  if (t === 'blogg') return it.type === 'blogg';
+  if (t === 'social') return it.type === 'linkedin';
+  if (t === 'email') return it.type === 'email';
+  if (t === 'annons') return it.type === 'annons';
+  if (t === 'web') return it.type === 'web';
+  return false; // event/pr finns bara på activities
+}
+
+function activityMatchesFilterType(a: MarketingActivity, t: FilterType): boolean {
+  if (t === 'social') return a.type === 'social_post';
+  if (t === 'email') return a.type === 'email_campaign';
+  if (t === 'annons') return a.type === 'ad';
+  if (t === 'event') return a.type === 'event';
+  if (t === 'pr') return a.type === 'pr';
+  // blogg/web finns bara på content_items
+  return false;
+}
+
 export default function Calendar() {
+  const [params, setParams] = useSearchParams();
+  const view = ((): ViewMode => {
+    const v = params.get('view');
+    if (v === 'week' || v === 'list') return v;
+    return 'month';
+  })();
+  function setView(v: ViewMode) {
+    const next = new URLSearchParams(params);
+    if (v === 'month') next.delete('view');
+    else next.set('view', v);
+    setParams(next, { replace: true });
+  }
+
+  // Filter — typ + kampanj. URL-baserade så de delas via länk.
+  const filterType = ((): FilterType | null => {
+    const v = params.get('type');
+    return FILTER_TYPES.includes(v as FilterType) ? (v as FilterType) : null;
+  })();
+  const filterCampaign = params.get('campaign') ?? null;
+
+  function setFilterType(t: FilterType | null) {
+    const next = new URLSearchParams(params);
+    if (t) next.set('type', t);
+    else next.delete('type');
+    setParams(next, { replace: true });
+  }
+  function setFilterCampaign(c: string | null) {
+    const next = new URLSearchParams(params);
+    if (c) next.set('campaign', c);
+    else next.delete('campaign');
+    setParams(next, { replace: true });
+  }
+  function clearFilters() {
+    const next = new URLSearchParams(params);
+    next.delete('type');
+    next.delete('campaign');
+    setParams(next, { replace: true });
+  }
+
   const [month, setMonth] = useState<{ year: number; month: number }>(() => {
     const d = new Date();
     return { year: d.getFullYear(), month: d.getMonth() };
   });
+  // Anchor-datum för veckovy (måndagen i den vecka som visas)
+  const [weekAnchor, setWeekAnchor] = useState<Date>(() => mondayOf(new Date()));
   const [items, setItems] = useState<CalendarItem[]>([]);
   const [cases, setCases] = useState<CaseRef[]>([]);
   const [activities, setActivities] = useState<MarketingActivity[]>([]);
@@ -92,6 +183,35 @@ export default function Calendar() {
 
   const grid = useMemo(() => buildMonthGrid(month.year, month.month), [month]);
 
+  // Tillgängliga kampanjer — alla unika campaign-värden från activities.
+  const availableCampaigns = useMemo(() => {
+    const set = new Set<string>();
+    activities.forEach((a) => {
+      if (a.campaign && a.campaign.trim()) set.add(a.campaign.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'sv'));
+  }, [activities]);
+
+  // Filtrerade arrayer — används av alla tre vyer.
+  const filteredItems = useMemo(() => {
+    return items.filter((it) => {
+      // Kampanj-filter — content_items har ingen kampanj, så de göms när kampanj är vald.
+      if (filterCampaign) return false;
+      if (filterType && !itemMatchesFilterType(it, filterType)) return false;
+      return true;
+    });
+  }, [items, filterType, filterCampaign]);
+
+  const filteredActivities = useMemo(() => {
+    return activities.filter((a) => {
+      if (filterCampaign && a.campaign !== filterCampaign) return false;
+      if (filterType && !activityMatchesFilterType(a, filterType)) return false;
+      return true;
+    });
+  }, [activities, filterType, filterCampaign]);
+
+  const filtersActive = filterType !== null || filterCampaign !== null;
+
   function shift(delta: number) {
     const d = new Date(month.year, month.month + delta, 1);
     setMonth({ year: d.getFullYear(), month: d.getMonth() });
@@ -102,12 +222,22 @@ export default function Calendar() {
     setMonth({ year: d.getFullYear(), month: d.getMonth() });
   }
 
+  function shiftWeek(deltaDays: number) {
+    const d = new Date(weekAnchor);
+    d.setDate(d.getDate() + deltaDays);
+    setWeekAnchor(mondayOf(d));
+  }
+
+  function thisWeek() {
+    setWeekAnchor(mondayOf(new Date()));
+  }
+
   function itemsForDate(iso: string): CalendarItem[] {
-    return items.filter((i) => i.scheduled_for === iso);
+    return filteredItems.filter((i) => i.scheduled_for === iso);
   }
 
   function activitiesForDate(iso: string): MarketingActivity[] {
-    return activities.filter((a) => a.scheduled_for === iso);
+    return filteredActivities.filter((a) => a.scheduled_for === iso);
   }
 
   function caseEventsForDate(iso: string): Array<{ case: CaseRef; kind: 'open' | 'close' }> {
@@ -163,21 +293,170 @@ export default function Calendar() {
       <div className="card card-hero">
         <div className="card-hero-title">Plan</div>
         <div className="card-hero-sub">
-          Alla marknadsaktiviteter på en månadsvy — content, social-poster, e-postkampanjer, annonser, events, PR
-          och case-milstolpar. Klicka på en dag för att lägga till content. Använd "+ Aktivitet" för andra typer.
+          Alla marknadsaktiviteter — content, social-poster, e-postkampanjer, annonser, events, PR
+          och case-milstolpar. Välj månadsvy för översikt, veckovy för detalj eller listvy för att
+          se vad som ska publiceras härnäst.
         </div>
-        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="header-link primary" onClick={() => setShowImportPlan(true)}>
+        <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div
+            style={{
+              display: 'inline-flex',
+              gap: 2,
+              padding: 3,
+              background: 'rgba(255,255,255,0.15)',
+              borderRadius: 8,
+              border: '1px solid rgba(255,255,255,0.25)',
+            }}
+          >
+            {(['month', 'week', 'list'] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className={'tab' + (view === v ? ' active' : '')}
+                style={{
+                  cursor: 'pointer',
+                  padding: '6px 14px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  background: view === v ? 'rgba(255,255,255,0.95)' : 'transparent',
+                  color: view === v ? 'var(--deep-teal)' : 'white',
+                  border: 'none',
+                  borderRadius: 6,
+                }}
+              >
+                {v === 'month' ? '📅 Månad' : v === 'week' ? '📋 Vecka' : '📝 Lista'}
+              </button>
+            ))}
+          </div>
+          <select
+            value={filterType ?? ''}
+            onChange={(e) => setFilterType((e.target.value || null) as FilterType | null)}
+            style={{
+              padding: '6px 10px',
+              fontSize: 12,
+              fontWeight: 600,
+              borderRadius: 6,
+              border: '1px solid rgba(255,255,255,0.35)',
+              background: filterType ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.15)',
+              color: filterType ? 'var(--deep-teal)' : 'white',
+              cursor: 'pointer',
+            }}
+            title="Filtrera på typ"
+          >
+            <option value="">Alla typer</option>
+            {FILTER_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {FILTER_TYPE_LABEL[t]}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={filterCampaign ?? ''}
+            onChange={(e) => setFilterCampaign(e.target.value || null)}
+            disabled={availableCampaigns.length === 0}
+            style={{
+              padding: '6px 10px',
+              fontSize: 12,
+              fontWeight: 600,
+              borderRadius: 6,
+              border: '1px solid rgba(255,255,255,0.35)',
+              background: filterCampaign ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.15)',
+              color: filterCampaign ? 'var(--deep-teal)' : 'white',
+              cursor: availableCampaigns.length === 0 ? 'not-allowed' : 'pointer',
+              opacity: availableCampaigns.length === 0 ? 0.5 : 1,
+              maxWidth: 200,
+            }}
+            title={
+              availableCampaigns.length === 0
+                ? 'Inga kampanjer ännu'
+                : 'Filtrera på kampanj'
+            }
+          >
+            <option value="">Alla kampanjer</option>
+            {availableCampaigns.map((c) => (
+              <option key={c} value={c}>
+                🎯 {c}
+              </option>
+            ))}
+          </select>
+
+          {filtersActive && (
+            <button
+              onClick={clearFilters}
+              style={{
+                padding: '6px 10px',
+                fontSize: 11,
+                fontWeight: 600,
+                borderRadius: 6,
+                border: '1px solid rgba(255,255,255,0.35)',
+                background: 'transparent',
+                color: 'white',
+                cursor: 'pointer',
+              }}
+              title="Rensa alla filter"
+            >
+              ✕ Rensa
+            </button>
+          )}
+
+          <button
+            className="header-link primary"
+            onClick={() => setShowImportPlan(true)}
+            style={{ marginLeft: 'auto' }}
+          >
             📥 Importera plan från Claude
           </button>
           <button className="header-link" onClick={() => setShowActivityForm(true)}>
             + Aktivitet
           </button>
         </div>
+        {filtersActive && (
+          <div
+            style={{
+              marginTop: 10,
+              fontSize: 11,
+              color: 'rgba(255,255,255,0.85)',
+              fontStyle: 'italic',
+            }}
+          >
+            {filterCampaign && (
+              <span>Visar kampanj: <strong>{filterCampaign}</strong> (innehållsbibliotek dolt — content_items har ingen kampanj-koppling)</span>
+            )}
+            {!filterCampaign && filterType && (
+              <span>Visar typ: <strong>{FILTER_TYPE_LABEL[filterType]}</strong></span>
+            )}
+          </div>
+        )}
       </div>
 
       {error && <div className="auth-error">{error}</div>}
 
+      {view === 'week' && (
+        <WeekView
+          anchor={weekAnchor}
+          items={filteredItems}
+          activities={filteredActivities}
+          cases={cases}
+          today={today}
+          onShift={shiftWeek}
+          onThis={thisWeek}
+          onPickDate={(iso) => setShowAdd(iso)}
+          onPickActivity={(a) => setSelectedActivity(a)}
+        />
+      )}
+
+      {view === 'list' && (
+        <AgendaView
+          items={filteredItems}
+          activities={filteredActivities}
+          cases={cases}
+          today={today}
+          onPickActivity={(a) => setSelectedActivity(a)}
+        />
+      )}
+
+      {view === 'month' && (
       <div className="card">
         <div className="card-title">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -194,10 +473,12 @@ export default function Calendar() {
               {monthName}
             </span>
           </div>
-          <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--muted-foreground)' }}>
-            <span><span style={{ color: 'var(--blue)' }}>●</span> GMF</span>
-            <span><span style={{ color: 'var(--purple)' }}>●</span> Case</span>
-            <span><span style={{ color: 'var(--destructive)' }}>●</span> Deadline</span>
+          <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--muted-foreground)', flexWrap: 'wrap' }}>
+            <span><span style={{ color: 'var(--muted-foreground)' }}>●</span> Planerad</span>
+            <span><span style={{ color: 'var(--green)' }}>●</span> Redo</span>
+            <span><span style={{ color: 'var(--deep-teal)' }}>●</span> Publicerad</span>
+            <span style={{ marginLeft: 8 }}>🎯 Kampanj</span>
+            <span><span style={{ color: 'var(--destructive)' }}>●</span> Case-event</span>
           </div>
         </div>
 
@@ -222,7 +503,7 @@ export default function Calendar() {
                 key={i}
                 onClick={() => inMonth && setShowAdd(iso)}
                 style={{
-                  minHeight: 100,
+                  minHeight: 130,
                   padding: 6,
                   border: '1px solid var(--border)',
                   borderRadius: 8,
@@ -235,13 +516,35 @@ export default function Calendar() {
               >
                 <div
                   style={{
-                    fontSize: 12,
-                    fontWeight: isToday ? 800 : 600,
-                    color: isToday ? 'var(--deep-teal)' : 'var(--foreground)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
                     marginBottom: 4,
                   }}
                 >
-                  {day.getDate()}
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: isToday ? 800 : 600,
+                      color: isToday ? 'var(--deep-teal)' : 'var(--foreground)',
+                    }}
+                  >
+                    {day.getDate()}
+                  </span>
+                  {(dayItems.length + dayActivities.length) > 0 && (
+                    <span
+                      style={{
+                        fontSize: 9,
+                        padding: '1px 5px',
+                        borderRadius: 8,
+                        background: 'var(--soft-cloud)',
+                        color: 'var(--muted-foreground)',
+                        fontWeight: 700,
+                      }}
+                    >
+                      {dayItems.length + dayActivities.length}
+                    </span>
+                  )}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                   {events.map((ev, j) => (
@@ -263,7 +566,7 @@ export default function Calendar() {
                       {ev.kind === 'open' ? '▶' : '⏰'} {ev.case.name}
                     </Link>
                   ))}
-                  {dayItems.slice(0, 3).map((it) => {
+                  {dayItems.slice(0, 4).map((it) => {
                     const trackColor = it.track ? TRACK_COLORS[it.track] : 'var(--muted-foreground)';
                     return (
                       <Link
@@ -301,12 +604,29 @@ export default function Calendar() {
                       </Link>
                     );
                   })}
-                  {dayItems.length > 3 && (
-                    <div style={{ fontSize: 10, color: 'var(--muted-foreground)', padding: '2px 5px' }}>
-                      +{dayItems.length - 3} till
-                    </div>
+                  {dayItems.length > 4 && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setWeekAnchor(mondayOf(day));
+                        setView('week');
+                      }}
+                      style={{
+                        fontSize: 10,
+                        color: 'var(--deep-teal)',
+                        padding: '2px 5px',
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        fontWeight: 600,
+                      }}
+                      title="Visa veckovy med alla aktiviteter denna dag"
+                    >
+                      +{dayItems.length - 4} till →
+                    </button>
                   )}
-                  {dayActivities.slice(0, 3).map((a) => (
+                  {dayActivities.slice(0, 4).map((a) => (
                     <div
                       key={`act-${a.id}`}
                       onClick={(e) => {
@@ -327,18 +647,56 @@ export default function Calendar() {
                         whiteSpace: 'nowrap',
                         textOverflow: 'ellipsis',
                         cursor: 'pointer',
-                        opacity: a.status === 'publicerad' ? 0.65 : 1,
+                        opacity: a.status === 'publicerad' ? 0.6 : 1,
                       }}
-                      title={`${ACTIVITY_TYPE_LABEL[a.type]}: ${a.title} — ${a.status}`}
+                      title={`${ACTIVITY_TYPE_LABEL[a.type]}: ${a.title} — ${a.status}${a.campaign ? ` · ${a.campaign}` : ''}`}
                     >
                       <span>{ACTIVITY_TYPE_ICON[a.type]}</span>
+                      <span
+                        style={{
+                          width: 5,
+                          height: 5,
+                          borderRadius: '50%',
+                          background: ACTIVITY_STATUS_COLORS[a.status] ?? 'gray',
+                          flexShrink: 0,
+                        }}
+                      />
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.title}</span>
+                      {a.campaign && (
+                        <span
+                          style={{
+                            fontSize: 8,
+                            color: 'var(--muted-foreground)',
+                            flexShrink: 0,
+                          }}
+                          title={`Kampanj: ${a.campaign}`}
+                        >
+                          🎯
+                        </span>
+                      )}
                     </div>
                   ))}
-                  {dayActivities.length > 3 && (
-                    <div style={{ fontSize: 10, color: 'var(--muted-foreground)', padding: '2px 5px' }}>
-                      +{dayActivities.length - 3} aktiviteter
-                    </div>
+                  {dayActivities.length > 4 && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setWeekAnchor(mondayOf(day));
+                        setView('week');
+                      }}
+                      style={{
+                        fontSize: 10,
+                        color: 'var(--deep-teal)',
+                        padding: '2px 5px',
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        fontWeight: 600,
+                      }}
+                      title="Visa veckovy med alla aktiviteter denna dag"
+                    >
+                      +{dayActivities.length - 4} aktiviteter →
+                    </button>
                   )}
                 </div>
               </div>
@@ -346,6 +704,7 @@ export default function Calendar() {
           })}
         </div>
       </div>
+      )}
 
       {showActivityForm && (
         <AddActivityForm
@@ -424,6 +783,423 @@ export default function Calendar() {
       )}
     </>
   );
+}
+
+// ============================================================================
+// Week view — 7 dagar horisontellt med fullt utrymme per cell
+// ============================================================================
+
+function WeekView({
+  anchor,
+  items,
+  activities,
+  cases,
+  today,
+  onShift,
+  onThis,
+  onPickDate,
+  onPickActivity,
+}: {
+  anchor: Date;
+  items: CalendarItem[];
+  activities: MarketingActivity[];
+  cases: CaseRef[];
+  today: string;
+  onShift: (deltaDays: number) => void;
+  onThis: () => void;
+  onPickDate: (iso: string) => void;
+  onPickActivity: (a: MarketingActivity) => void;
+}) {
+  const days = useMemo(() => weekDates(anchor), [anchor]);
+  const startLabel = days[0].toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
+  const endLabel = days[6].toLocaleDateString('sv-SE', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  return (
+    <div className="card">
+      <div className="card-title">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button className="content-action-btn" onClick={() => onShift(-7)}>
+            ←
+          </button>
+          <button className="content-action-btn" onClick={onThis}>
+            Denna vecka
+          </button>
+          <button className="content-action-btn" onClick={() => onShift(7)}>
+            →
+          </button>
+          <span style={{ marginLeft: 12, fontSize: 15, fontWeight: 800, color: 'var(--deep-teal)' }}>
+            {startLabel} – {endLabel}
+          </span>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
+        {days.map((day) => {
+          const iso = toIso(day);
+          const isToday = iso === today;
+          const dayItems = items.filter((i) => i.scheduled_for === iso);
+          const dayActivities = activities.filter((a) => a.scheduled_for === iso);
+          const events: Array<{ case: CaseRef; kind: 'open' | 'close' }> = [];
+          cases.forEach((c) => {
+            if (c.emission_open === iso) events.push({ case: c, kind: 'open' });
+            if (c.emission_close === iso) events.push({ case: c, kind: 'close' });
+          });
+          const dayLabel = day.toLocaleDateString('sv-SE', { weekday: 'short' });
+          return (
+            <div
+              key={iso}
+              onClick={() => onPickDate(iso)}
+              style={{
+                minHeight: 280,
+                padding: 8,
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                background: 'var(--card)',
+                cursor: 'pointer',
+                ...(isToday ? { borderColor: 'var(--deep-teal)', borderWidth: 2 } : {}),
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  marginBottom: 8,
+                  paddingBottom: 6,
+                  borderBottom: '1px solid var(--border)',
+                }}
+              >
+                <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--muted-foreground)' }}>
+                  {dayLabel}
+                </span>
+                <span
+                  style={{
+                    fontSize: 22,
+                    fontWeight: isToday ? 900 : 700,
+                    color: isToday ? 'var(--deep-teal)' : 'var(--foreground)',
+                  }}
+                >
+                  {day.getDate()}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {events.map((ev, j) => (
+                  <Link
+                    key={`ev-${j}`}
+                    to={`/cases?id=${ev.case.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      fontSize: 11,
+                      padding: '4px 6px',
+                      borderRadius: 4,
+                      background: 'var(--red-bg)',
+                      color: '#a3343f',
+                      fontWeight: 700,
+                      textDecoration: 'none',
+                    }}
+                  >
+                    {ev.kind === 'open' ? '▶' : '⏰'} {ev.case.name}
+                  </Link>
+                ))}
+                {dayItems.map((it) => {
+                  const trackColor = it.track ? TRACK_COLORS[it.track] : 'var(--muted-foreground)';
+                  return (
+                    <Link
+                      key={it.id}
+                      to={`/content`}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        fontSize: 11,
+                        padding: '4px 6px',
+                        borderRadius: 4,
+                        background: 'var(--soft-cloud)',
+                        borderLeft: `3px solid ${trackColor}`,
+                        color: 'var(--foreground)',
+                        textDecoration: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                      title={`${it.title} — ${it.status}`}
+                    >
+                      <span>{TYPE_ICONS[it.type]}</span>
+                      <span
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: '50%',
+                          background: STATUS_COLORS[it.status] ?? 'gray',
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {it.title}
+                      </span>
+                    </Link>
+                  );
+                })}
+                {dayActivities.map((a) => (
+                  <div
+                    key={`act-${a.id}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onPickActivity(a);
+                    }}
+                    style={{
+                      fontSize: 11,
+                      padding: '4px 6px',
+                      borderRadius: 4,
+                      background: ACTIVITY_TYPE_COLOR[a.type] + '20',
+                      borderLeft: `3px solid ${ACTIVITY_TYPE_COLOR[a.type]}`,
+                      color: 'var(--foreground)',
+                      cursor: 'pointer',
+                      opacity: a.status === 'publicerad' ? 0.65 : 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                    title={`${ACTIVITY_TYPE_LABEL[a.type]}: ${a.title} — ${a.status}`}
+                  >
+                    <span>{ACTIVITY_TYPE_ICON[a.type]}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {a.title}
+                    </span>
+                  </div>
+                ))}
+                {events.length + dayItems.length + dayActivities.length === 0 && (
+                  <div style={{ fontSize: 11, color: 'var(--muted-foreground)', fontStyle: 'italic', padding: '4px 0' }}>
+                    Inget planerat
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Agenda view — lista över kommande aktiviteter, datum-grupperade
+// ============================================================================
+
+function AgendaView({
+  items,
+  activities,
+  cases,
+  today,
+  onPickActivity,
+}: {
+  items: CalendarItem[];
+  activities: MarketingActivity[];
+  cases: CaseRef[];
+  today: string;
+  onPickActivity: (a: MarketingActivity) => void;
+}) {
+  const grouped = useMemo(() => {
+    type AgendaItem =
+      | { kind: 'item'; date: string; data: CalendarItem }
+      | { kind: 'activity'; date: string; data: MarketingActivity }
+      | { kind: 'event'; date: string; data: { case: CaseRef; kind: 'open' | 'close' } };
+
+    const all: AgendaItem[] = [];
+    items.forEach((it) => {
+      if (it.scheduled_for) all.push({ kind: 'item', date: it.scheduled_for, data: it });
+    });
+    activities.forEach((a) => {
+      if (a.scheduled_for) all.push({ kind: 'activity', date: a.scheduled_for, data: a });
+    });
+    cases.forEach((c) => {
+      if (c.emission_open) all.push({ kind: 'event', date: c.emission_open, data: { case: c, kind: 'open' } });
+      if (c.emission_close) all.push({ kind: 'event', date: c.emission_close, data: { case: c, kind: 'close' } });
+    });
+
+    // Filtrera bort gammalt och sortera
+    const todayMs = new Date(today + 'T00:00:00').getTime();
+    const filtered = all
+      .filter((x) => new Date(x.date + 'T00:00:00').getTime() >= todayMs - 7 * 24 * 3600 * 1000) // 7 dagar bakåt också
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    // Gruppera per datum
+    const map = new Map<string, AgendaItem[]>();
+    for (const x of filtered) {
+      if (!map.has(x.date)) map.set(x.date, []);
+      map.get(x.date)!.push(x);
+    }
+    return Array.from(map.entries()).map(([date, list]) => ({ date, list }));
+  }, [items, activities, cases, today]);
+
+  if (grouped.length === 0) {
+    return (
+      <div className="card empty-state">
+        <strong>Inga aktiviteter planerade</strong>
+        Klicka "+ Aktivitet" eller "Importera plan från Claude" för att lägga in.
+      </div>
+    );
+  }
+
+  return (
+    <div className="card" style={{ padding: 0 }}>
+      {grouped.map(({ date, list }) => {
+        const d = new Date(date + 'T00:00:00');
+        const isToday = date === today;
+        const isPast = date < today;
+        const friendly = isToday
+          ? 'IDAG'
+          : friendlyDateLabel(d, today);
+        return (
+          <div key={date} style={{ borderBottom: '1px solid var(--border)' }}>
+            <div
+              style={{
+                padding: '10px 16px',
+                background: isToday ? 'var(--deep-teal)' : 'var(--soft-cloud)',
+                color: isToday ? 'white' : 'var(--muted-foreground)',
+                fontWeight: 700,
+                fontSize: 12,
+                textTransform: 'uppercase',
+                letterSpacing: 0.5,
+                display: 'flex',
+                justifyContent: 'space-between',
+                opacity: isPast ? 0.6 : 1,
+              }}
+            >
+              <span>{friendly}</span>
+              <span>
+                {d.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' })}
+                {' · '}
+                {list.length} item{list.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {list.map((x, i) => {
+                if (x.kind === 'event') {
+                  return (
+                    <Link
+                      key={`ev-${i}`}
+                      to={`/cases?id=${x.data.case.id}`}
+                      style={{
+                        padding: '12px 16px',
+                        borderBottom: '1px solid var(--border)',
+                        textDecoration: 'none',
+                        color: 'var(--foreground)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                      }}
+                    >
+                      <span style={{ fontSize: 18 }}>{x.data.kind === 'open' ? '▶' : '⏰'}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: '#a3343f' }}>
+                          {x.data.case.name} — emission {x.data.kind === 'open' ? 'öppnar' : 'STÄNGER'}
+                        </div>
+                      </div>
+                      <span className="badge" style={{ background: 'var(--red-bg)', color: '#a3343f' }}>
+                        Case
+                      </span>
+                    </Link>
+                  );
+                }
+                if (x.kind === 'item') {
+                  const it = x.data;
+                  const trackColor = it.track ? TRACK_COLORS[it.track] : 'var(--muted-foreground)';
+                  return (
+                    <Link
+                      key={it.id}
+                      to={`/content`}
+                      style={{
+                        padding: '12px 16px',
+                        borderBottom: '1px solid var(--border)',
+                        textDecoration: 'none',
+                        color: 'var(--foreground)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        borderLeft: `3px solid ${trackColor}`,
+                      }}
+                    >
+                      <span style={{ fontSize: 18 }}>{TYPE_ICONS[it.type]}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{it.title}</div>
+                        <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
+                          {it.type} · {it.status}
+                        </div>
+                      </div>
+                      <span
+                        className="badge"
+                        style={{
+                          background: STATUS_COLORS[it.status] ?? 'gray',
+                          color: 'white',
+                        }}
+                      >
+                        {it.status}
+                      </span>
+                    </Link>
+                  );
+                }
+                // activity
+                const a = x.data;
+                return (
+                  <div
+                    key={a.id}
+                    onClick={() => onPickActivity(a)}
+                    style={{
+                      padding: '12px 16px',
+                      borderBottom: '1px solid var(--border)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      borderLeft: `3px solid ${ACTIVITY_TYPE_COLOR[a.type]}`,
+                      opacity: a.status === 'publicerad' ? 0.65 : 1,
+                    }}
+                  >
+                    <span style={{ fontSize: 18 }}>{ACTIVITY_TYPE_ICON[a.type]}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{a.title}</div>
+                      <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
+                        {ACTIVITY_TYPE_LABEL[a.type]}
+                        {a.channel && ` · ${findChannel(a.channel)?.label ?? a.channel}`}
+                        {a.campaign && ` · ${a.campaign}`}
+                      </div>
+                    </div>
+                    <span
+                      className="badge"
+                      style={{
+                        background:
+                          a.status === 'publicerad'
+                            ? 'var(--deep-teal)'
+                            : a.status === 'redo'
+                            ? '#15a37e'
+                            : a.status === 'inställd'
+                            ? '#c33'
+                            : 'var(--muted-foreground)',
+                        color: 'white',
+                      }}
+                    >
+                      {a.status}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function friendlyDateLabel(d: Date, todayIso: string): string {
+  const today = new Date(todayIso + 'T00:00:00');
+  const diffDays = Math.round((d.getTime() - today.getTime()) / (24 * 3600 * 1000));
+  if (diffDays === 0) return 'Idag';
+  if (diffDays === 1) return 'Imorgon';
+  if (diffDays === -1) return 'Igår';
+  if (diffDays > 0 && diffDays < 7) return d.toLocaleDateString('sv-SE', { weekday: 'long' });
+  if (diffDays < 0 && diffDays > -7) return d.toLocaleDateString('sv-SE', { weekday: 'long' }) + ' (förra veckan)';
+  return d.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
 }
 
 function ImportPlanModal({
@@ -1056,6 +1832,25 @@ function AddActivityForm({ onClose, onSaved }: { onClose: () => void; onSaved: (
       </div>
     </div>
   );
+}
+
+function mondayOf(d: Date): Date {
+  const date = new Date(d);
+  const day = (date.getDay() + 6) % 7; // mån=0
+  date.setDate(date.getDate() - day);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function weekDates(anchor: Date): Date[] {
+  const start = mondayOf(anchor);
+  const out: Date[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    out.push(d);
+  }
+  return out;
 }
 
 function buildMonthGrid(year: number, month: number): Date[] {
