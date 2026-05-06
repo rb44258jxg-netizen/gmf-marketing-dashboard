@@ -6,16 +6,11 @@ import Layout from './components/Layout';
 import Overview from './pages/Overview';
 import Knowledge from './pages/Knowledge';
 import Content from './pages/Content';
-import Email from './pages/Email';
-import Social from './pages/Social';
-import Channels from './pages/Channels';
+import ChannelsHub from './pages/ChannelsHub';
 import Chat from './pages/Chat';
-import Briefing from './pages/Briefing';
-import Runs from './pages/Runs';
 import Cases from './pages/Cases';
 import Calendar from './pages/Calendar';
-import Analytics from './pages/Analytics';
-import Audit from './pages/Audit';
+import Insights from './pages/Insights';
 
 export default function App() {
   const { session, loading } = useAuth();
@@ -57,16 +52,26 @@ export default function App() {
         <Route path="/personas" element={<Navigate to="/knowledge?view=personas" replace />} />
         <Route path="/competitors" element={<Navigate to="/knowledge?view=competitors" replace />} />
         <Route path="/content" element={<Content />} />
-        <Route path="/email" element={<Email />} />
-        <Route path="/social" element={<Social />} />
-        <Route path="/channels" element={<Channels />} />
+
+        {/* Plan — kalender + (Sprint A) marknadsaktiviteter */}
+        <Route path="/plan" element={<Calendar />} />
+        <Route path="/calendar" element={<Navigate to="/plan" replace />} />
+
+        {/* Kanaler-hub: Sociala medier + E-post + Integrationsstatus */}
+        <Route path="/channels" element={<ChannelsHub />} />
+        <Route path="/email" element={<Navigate to="/channels?view=email" replace />} />
+        <Route path="/social" element={<Navigate to="/channels?view=social" replace />} />
+
         <Route path="/chat" element={<Chat />} />
-        <Route path="/briefing" element={<Briefing />} />
-        <Route path="/runs" element={<Runs />} />
         <Route path="/cases" element={<Cases />} />
-        <Route path="/calendar" element={<Calendar />} />
-        <Route path="/analytics" element={<Analytics />} />
-        <Route path="/audit" element={<Audit />} />
+
+        {/* Insikter-hub: Analytics + Briefing + Körningar + Audit */}
+        <Route path="/insights" element={<Insights />} />
+        <Route path="/analytics" element={<Navigate to="/insights?view=analytics" replace />} />
+        <Route path="/briefing" element={<Navigate to="/insights?view=briefing" replace />} />
+        <Route path="/runs" element={<Navigate to="/insights?view=runs" replace />} />
+        <Route path="/audit" element={<Navigate to="/insights?view=audit" replace />} />
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

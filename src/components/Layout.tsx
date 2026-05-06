@@ -4,18 +4,12 @@ import { useAuth } from '../lib/auth';
 
 const TABS = [
   { to: '/', label: 'Översikt' },
+  { to: '/plan', label: 'Plan' },
+  { to: '/content', label: 'Innehåll' },
+  { to: '/channels', label: 'Kanaler' },
   { to: '/cases', label: 'Cases' },
   { to: '/knowledge', label: 'Knowledge' },
-  { to: '/content', label: 'Innehåll' },
-  { to: '/calendar', label: 'Kalender' },
-  { to: '/email', label: 'E-post' },
-  { to: '/social', label: 'Sociala medier' },
-  { to: '/channels', label: 'Kanaler' },
-  { to: '/analytics', label: 'Analytics' },
-  { to: '/briefing', label: 'Briefing' },
-  { to: '/runs', label: 'Körningar' },
-  { to: '/chat', label: '🤖 Bottar' },
-  { to: '/audit', label: 'Audit' },
+  { to: '/insights', label: 'Insikter' },
 ];
 
 export default function Layout({ children }: { children: ReactNode }) {
