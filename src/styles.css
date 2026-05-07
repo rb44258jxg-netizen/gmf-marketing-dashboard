@@ -383,3 +383,25 @@ a:hover { color: var(--primary); }
   .chat-shell { grid-template-columns: 1fr; height: auto; }
   .chat-sidebar { max-height: 300px; }
 }
+
+/* Plan-sida: hero-card och kalender-grid på mobile.
+ * - Hero-knapparna stackas i två rader istället för att svämma över
+ * - Månadsgriden låter användaren scrolla horisontellt istället för att
+ *   trycka in 7 mikro-celler. Veckogriden gör samma.
+ * - Listvyn är redan mobile-vänlig och kräver inget. */
+@media (max-width: 768px) {
+  .kpi-grid { grid-template-columns: 1fr; }
+  .card-hero-title { font-size: 18px; }
+  .card-hero-sub { font-size: 12px; }
+
+  /* Kalender-grids tillåts svämma och scrolla horisontellt på små skärmar
+   * så att celler behåller läsbar bredd. Använder data-attribut för att
+   * peka på Plan-gridarna specifikt. */
+  [data-plan-grid] {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  [data-plan-grid] > div {
+    min-width: 700px;
+  }
+}

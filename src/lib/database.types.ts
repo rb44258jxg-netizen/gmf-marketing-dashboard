@@ -35,6 +35,7 @@ export interface ContentItemRow {
   track: ContentTrack | null;
   file: string | null;
   notes: string | null;
+  campaign: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;

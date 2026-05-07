@@ -1,17 +1,23 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { useAuth } from '../lib/auth';
+import { FUNNELS_ENABLED } from '../lib/featureFlags';
 
-const TABS = [
+const ALL_TABS = [
   { to: '/', label: 'Översikt' },
   { to: '/plan', label: 'Plan' },
   { to: '/content', label: 'Innehåll' },
   { to: '/channels', label: 'Kanaler' },
   { to: '/cases', label: 'Cases' },
-  { to: '/funnels', label: 'Funnels' },
+  { to: '/funnels', label: 'Funnels', flag: 'funnels' as const },
   { to: '/knowledge', label: 'Knowledge' },
   { to: '/insights', label: 'Insikter' },
 ];
+
+const TABS = ALL_TABS.filter((t) => {
+  if (t.flag === 'funnels') return FUNNELS_ENABLED;
+  return true;
+});
 
 export default function Layout({ children }: { children: ReactNode }) {
   const { user, signOut } = useAuth();

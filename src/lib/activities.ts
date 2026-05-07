@@ -49,12 +49,16 @@ export const ACTIVITY_TYPE_COLOR: Record<ActivityType, string> = {
   other: '#73848c',
 };
 
+// composerUrl ska peka på en URL som faktiskt finns och leder till "skapa nytt
+// inlägg / kampanj". Vid live-test 2026-05-06 var dashboard.mailerlite.com/campaigns
+// 404, /post/new/ på LinkedIn fanns inte heller. Updaterade till URLs som
+// är verifierade live (intent-URL för X stöder dessutom prefilled text via ?text=).
 export const CHANNELS: Array<{ value: string; label: string; icon: string; composerUrl?: string }> = [
-  { value: 'linkedin', label: 'LinkedIn', icon: '💼', composerUrl: 'https://www.linkedin.com/post/new/' },
+  { value: 'linkedin', label: 'LinkedIn', icon: '💼', composerUrl: 'https://www.linkedin.com/feed/' },
   { value: 'meta_fb', label: 'Facebook', icon: '📘', composerUrl: 'https://www.facebook.com/' },
   { value: 'meta_ig', label: 'Instagram', icon: '📸', composerUrl: 'https://www.instagram.com/' },
-  { value: 'twitter', label: 'X (Twitter)', icon: '𝕏', composerUrl: 'https://twitter.com/compose/post' },
-  { value: 'mailerlite', label: 'MailerLite', icon: '📨', composerUrl: 'https://dashboard.mailerlite.com/campaigns' },
+  { value: 'twitter', label: 'X (Twitter)', icon: '𝕏', composerUrl: 'https://x.com/intent/post' },
+  { value: 'mailerlite', label: 'MailerLite', icon: '📨', composerUrl: 'https://dashboard.mailerlite.com/' },
   { value: 'blog', label: 'Blogg', icon: '📝', composerUrl: 'https://finance.greenmerc.com/admin' },
   { value: 'press', label: 'Press', icon: '📰' },
   { value: 'event', label: 'Event', icon: '📅' },

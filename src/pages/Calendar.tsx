@@ -18,6 +18,7 @@ import {
   type MarketingActivity,
 } from '../lib/activities';
 import { CLAUDE_PLAN_PROMPT, parsePlan, type ParsedActivity } from '../lib/planParser';
+import { useEscapeKey } from '../lib/useEscapeKey';
 
 interface CalendarItem extends ContentItemRow {
   case_id?: string | null;
@@ -53,7 +54,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const ACTIVITY_STATUS_COLORS: Record<string, string> = {
-  planerad: 'var(--muted-foreground)',
+  planerad: 'var(--blue)',
   redo: 'var(--green)',
   publicerad: 'var(--deep-teal)',
   inställd: 'var(--destructive)',
@@ -154,11 +155,22 @@ export default function Calendar() {
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
-  const [draftType, setDraftType] = useState<ContentType>('linkedin');
+  const [draftActivityType, setDraftActivityType] = useState<ActivityType>('social_post');
+  const [draftChannel, setDraftChannel] = useState<string>('linkedin');
   const [busy, setBusy] = useState(false);
   const [showActivityForm, setShowActivityForm] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState<MarketingActivity | null>(null);
   const [showImportPlan, setShowImportPlan] = useState(false);
+
+  // ESC stänger quickAdd-modalen
+  useEffect(() => {
+    if (!showAdd) return;
+    function handler(e: KeyboardEvent) {
+      if (e.key === 'Escape') setShowAdd(null);
+    }
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [showAdd]);
 
   async function load() {
     const [itemsRes, casesRes, activitiesPromise] = await Promise.all([
@@ -183,20 +195,22 @@ export default function Calendar() {
 
   const grid = useMemo(() => buildMonthGrid(month.year, month.month), [month]);
 
-  // Tillgängliga kampanjer — alla unika campaign-värden från activities.
+  // Tillgängliga kampanjer — alla unika campaign-värden från activities + content_items.
   const availableCampaigns = useMemo(() => {
     const set = new Set<string>();
     activities.forEach((a) => {
       if (a.campaign && a.campaign.trim()) set.add(a.campaign.trim());
     });
+    items.forEach((it) => {
+      if (it.campaign && it.campaign.trim()) set.add(it.campaign.trim());
+    });
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'sv'));
-  }, [activities]);
+  }, [activities, items]);
 
   // Filtrerade arrayer — används av alla tre vyer.
   const filteredItems = useMemo(() => {
     return items.filter((it) => {
-      // Kampanj-filter — content_items har ingen kampanj, så de göms när kampanj är vald.
-      if (filterCampaign) return false;
+      if (filterCampaign && it.campaign !== filterCampaign) return false;
       if (filterType && !itemMatchesFilterType(it, filterType)) return false;
       return true;
     });
@@ -253,30 +267,31 @@ export default function Calendar() {
     if (!draftTitle.trim()) return;
     setBusy(true);
     try {
-      const { data, error: err } = await supabase
-        .from('content_items')
-        .insert({
-          title: draftTitle.trim(),
-          type: draftType,
-          status: 'utkast',
-          scheduled_for: date,
-        })
-        .select()
-        .single();
-      if (err) {
-        setError(err.message);
-        return;
-      }
+      const created = await createActivity({
+        title: draftTitle.trim(),
+        type: draftActivityType,
+        channel: draftChannel || null,
+        status: 'planerad',
+        scheduled_for: date,
+        description: null,
+        body: null,
+        campaign: null,
+        case_id: null,
+        owner: null,
+        external_url: null,
+      });
       await logAudit({
-        action: 'content.create',
-        entity_type: 'content_item',
-        entity_id: (data as ContentItemRow).id,
+        action: 'activity.create',
+        entity_type: 'marketing_activity',
+        entity_id: created.id,
         before: null,
-        after: data,
+        after: created,
       });
       setShowAdd(null);
       setDraftTitle('');
       await load();
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -420,8 +435,11 @@ export default function Calendar() {
               fontStyle: 'italic',
             }}
           >
-            {filterCampaign && (
-              <span>Visar kampanj: <strong>{filterCampaign}</strong> (innehållsbibliotek dolt — content_items har ingen kampanj-koppling)</span>
+            {filterCampaign && filterType && (
+              <span>Visar kampanj <strong>{filterCampaign}</strong> · typ <strong>{FILTER_TYPE_LABEL[filterType]}</strong></span>
+            )}
+            {filterCampaign && !filterType && (
+              <span>Visar kampanj: <strong>{filterCampaign}</strong></span>
             )}
             {!filterCampaign && filterType && (
               <span>Visar typ: <strong>{FILTER_TYPE_LABEL[filterType]}</strong></span>
@@ -474,7 +492,7 @@ export default function Calendar() {
             </span>
           </div>
           <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--muted-foreground)', flexWrap: 'wrap' }}>
-            <span><span style={{ color: 'var(--muted-foreground)' }}>●</span> Planerad</span>
+            <span><span style={{ color: 'var(--blue)' }}>●</span> Planerad</span>
             <span><span style={{ color: 'var(--green)' }}>●</span> Redo</span>
             <span><span style={{ color: 'var(--deep-teal)' }}>●</span> Publicerad</span>
             <span style={{ marginLeft: 8 }}>🎯 Kampanj</span>
@@ -482,6 +500,7 @@ export default function Calendar() {
           </div>
         </div>
 
+        <div data-plan-grid>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, fontSize: 11, marginBottom: 4 }}>
           {['Mån', 'Tis', 'Ons', 'Tor', 'Fre', 'Lör', 'Sön'].map((d) => (
             <div key={d} style={{ padding: '4px 8px', fontWeight: 700, color: 'var(--muted-foreground)', textTransform: 'uppercase' }}>
@@ -504,6 +523,8 @@ export default function Calendar() {
                 onClick={() => inMonth && setShowAdd(iso)}
                 style={{
                   minHeight: 130,
+                  minWidth: 0,
+                  overflow: 'hidden',
                   padding: 6,
                   border: '1px solid var(--border)',
                   borderRadius: 8,
@@ -593,14 +614,14 @@ export default function Calendar() {
                         <span>{TYPE_ICONS[it.type]}</span>
                         <span
                           style={{
-                            width: 5,
-                            height: 5,
+                            width: 7,
+                            height: 7,
                             borderRadius: '50%',
                             background: STATUS_COLORS[it.status] ?? 'gray',
                             flexShrink: 0,
                           }}
                         />
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.title}</span>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: 1 }}>{it.title}</span>
                       </Link>
                     );
                   })}
@@ -654,14 +675,14 @@ export default function Calendar() {
                       <span>{ACTIVITY_TYPE_ICON[a.type]}</span>
                       <span
                         style={{
-                          width: 5,
-                          height: 5,
+                          width: 7,
+                          height: 7,
                           borderRadius: '50%',
                           background: ACTIVITY_STATUS_COLORS[a.status] ?? 'gray',
                           flexShrink: 0,
                         }}
                       />
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.title}</span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: 1 }}>{a.title}</span>
                       {a.campaign && (
                         <span
                           style={{
@@ -702,6 +723,7 @@ export default function Calendar() {
               </div>
             );
           })}
+        </div>
         </div>
       </div>
       )}
@@ -744,7 +766,7 @@ export default function Calendar() {
       {showAdd && (
         <div className="modal-backdrop" onClick={() => setShowAdd(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Schemalägg innehåll — {showAdd}</h2>
+            <h2>Lägg till aktivitet — {showAdd}</h2>
             <label className="persona-input-label">Titel</label>
             <input
               className="persona-input"
@@ -754,21 +776,41 @@ export default function Calendar() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter') quickAdd(showAdd);
               }}
+              placeholder="t.ex. LinkedIn-post om Q2-rundan"
             />
-            <label className="persona-input-label">Typ</label>
-            <select
-              className="persona-input"
-              value={draftType}
-              onChange={(e) => setDraftType(e.target.value as ContentType)}
-            >
-              <option value="blogg">Blogg</option>
-              <option value="linkedin">LinkedIn</option>
-              <option value="email">E-post</option>
-              <option value="annons">Annons</option>
-              <option value="web">Webb</option>
-            </select>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+              <div>
+                <label className="persona-input-label">Typ</label>
+                <select
+                  className="persona-input"
+                  value={draftActivityType}
+                  onChange={(e) => setDraftActivityType(e.target.value as ActivityType)}
+                >
+                  <option value="social_post">📣 Social post</option>
+                  <option value="email_campaign">✉️ E-postkampanj</option>
+                  <option value="ad">📢 Annons</option>
+                  <option value="event">📅 Event</option>
+                  <option value="pr">📰 PR / Press</option>
+                  <option value="other">🔖 Övrigt</option>
+                </select>
+              </div>
+              <div>
+                <label className="persona-input-label">Kanal</label>
+                <select
+                  className="persona-input"
+                  value={draftChannel}
+                  onChange={(e) => setDraftChannel(e.target.value)}
+                >
+                  {CHANNELS.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.icon} {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
             <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 8 }}>
-              Skapas som utkast. Redigera typ/spår/case i Content Library.
+              Skapas som <strong>planerad</strong>. Klicka aktiviteten sen för att lägga till copy + kampanj.
             </div>
             <div className="modal-actions">
               <button className="btn-secondary" onClick={() => setShowAdd(null)} disabled={busy}>
@@ -833,6 +875,7 @@ function WeekView({
         </div>
       </div>
 
+      <div data-plan-grid>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
         {days.map((day) => {
           const iso = toIso(day);
@@ -851,12 +894,13 @@ function WeekView({
               onClick={() => onPickDate(iso)}
               style={{
                 minHeight: 280,
+                minWidth: 0,
+                overflow: 'hidden',
                 padding: 8,
-                border: '1px solid var(--border)',
+                border: isToday ? '2px solid var(--deep-teal)' : '1px solid var(--border)',
                 borderRadius: 8,
-                background: 'var(--card)',
+                background: isToday ? 'rgba(29, 135, 117, 0.04)' : 'var(--card)',
                 cursor: 'pointer',
-                ...(isToday ? { borderColor: 'var(--deep-teal)', borderWidth: 2 } : {}),
               }}
             >
               <div
@@ -933,7 +977,7 @@ function WeekView({
                           flexShrink: 0,
                         }}
                       />
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1 }}>
                         {it.title}
                       </span>
                     </Link>
@@ -959,23 +1003,55 @@ function WeekView({
                       alignItems: 'center',
                       gap: 4,
                     }}
-                    title={`${ACTIVITY_TYPE_LABEL[a.type]}: ${a.title} — ${a.status}`}
+                    title={`${ACTIVITY_TYPE_LABEL[a.type]}: ${a.title} — ${a.status}${a.campaign ? ` · ${a.campaign}` : ''}`}
                   >
                     <span>{ACTIVITY_TYPE_ICON[a.type]}</span>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span
+                      style={{
+                        width: 7,
+                        height: 7,
+                        borderRadius: '50%',
+                        background: ACTIVITY_STATUS_COLORS[a.status] ?? 'gray',
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1 }}>
                       {a.title}
                     </span>
+                    {a.campaign && (
+                      <span style={{ fontSize: 10, opacity: 0.7, flexShrink: 0 }} title={`Kampanj: ${a.campaign}`}>
+                        🎯
+                      </span>
+                    )}
                   </div>
                 ))}
                 {events.length + dayItems.length + dayActivities.length === 0 && (
-                  <div style={{ fontSize: 11, color: 'var(--muted-foreground)', fontStyle: 'italic', padding: '4px 0' }}>
-                    Inget planerat
-                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onPickDate(iso);
+                    }}
+                    style={{
+                      fontSize: 11,
+                      color: 'var(--muted-foreground)',
+                      padding: '6px 8px',
+                      background: 'transparent',
+                      border: '1px dashed var(--border)',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      width: '100%',
+                    }}
+                    title="Lägg till innehåll på den här dagen"
+                  >
+                    + Lägg till
+                  </button>
                 )}
               </div>
             </div>
           );
         })}
+      </div>
       </div>
     </div>
   );
@@ -1209,6 +1285,7 @@ function ImportPlanModal({
   onClose: () => void;
   onSaved: (count: number) => void | Promise<void>;
 }) {
+  useEscapeKey(onClose);
   const [text, setText] = useState('');
   const [campaignOverride, setCampaignOverride] = useState('');
   const [saving, setSaving] = useState(false);
@@ -1443,6 +1520,7 @@ function ActivityDetailModal({
   onChanged: (next: MarketingActivity) => void | Promise<void>;
   onDeleted: () => void | Promise<void>;
 }) {
+  useEscapeKey(onClose);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -1707,6 +1785,7 @@ function statusBadge(status: ActivityStatus): string {
 }
 
 function AddActivityForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => void | Promise<void> }) {
+  useEscapeKey(onClose);
   const [type, setType] = useState<ActivityType>('social_post');
   const [channel, setChannel] = useState<string>('linkedin');
   const [title, setTitle] = useState('');
